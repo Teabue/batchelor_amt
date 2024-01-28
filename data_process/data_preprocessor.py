@@ -8,6 +8,7 @@ import random
 import pandas as pd
 from typing import List
 import tqdm
+import cv2
 
 
 class Data_Preprocessor():
@@ -15,6 +16,9 @@ class Data_Preprocessor():
         with open(CONFIG_PATH, 'r') as f:
             CONFIG = yaml.load(f, Loader=yaml.SafeLoader)
         self.config = CONFIG
+        
+        # Save segments as images?
+        self.save_segment_img = CONFIG['save_spectrogram_imgs']
         
         # Audio sampling configs (we can add n_bins, but we'll see)
         self.sr = CONFIG['sample_rate']
@@ -27,9 +31,11 @@ class Data_Preprocessor():
         self.test_split = CONFIG['test_split']
         self.random_seed = CONFIG['random_seed']
         
-        # Output folder
+        # Output folders
         self.output_dir = CONFIG['output_dir']
+        self.output_img_dir = CONFIG['output_img_dir']
         os.makedirs(self.output_dir, exist_ok=True)
+        os.makedirs(self.output_img_dir, exist_ok=True)
         
         # Set these in child class
         self.files: List[str] = None
@@ -99,7 +105,8 @@ class Data_Preprocessor():
                               onset_frames: np.ndarray, 
                               ground_truths: List[List[int]], 
                               df_preprocessed_data: pd.DataFrame, 
-                              audio_name: str) -> pd.DataFrame:
+                              audio_name: str,
+                              split: str) -> pd.DataFrame:
 
         # Get times from S_db
         times = librosa.times_like(S_db, sr=self.sr, hop_length=self.hop_length)
@@ -121,9 +128,15 @@ class Data_Preprocessor():
             onset = np.any((segment_start_idx <= onset_frames) & (onset_frames < segment_end_idx))
             
             
+            audio_path = os.path.join(audio_name + self.audio_format)
             
+            if self.save_segment_img:
+                img_path = self.segment_save_img(S_db, segment_start_idx, segment_end_idx, audio_name, split)
+            else:
+                img_path = None
+                
             # Add the segment to the dataframe
-            df_preprocessed_data.loc[len(df_preprocessed_data)] = {'audio_name': os.path.join(audio_name + self.audio_format), 
+            df_preprocessed_data.loc[len(df_preprocessed_data)] = {'audio_path': audio_path,
                                                                 'audio_sr': self.sr, 
                                                                 'audio_hop_length': self.hop_length, 
                                                                 'audio_transform': self.transform,
@@ -131,11 +144,40 @@ class Data_Preprocessor():
                                                                 'segment_start_idx': segment_start_idx, 
                                                                 'segment_end_idx(not_including)': segment_end_idx, 
                                                                 'segment_midi_pitches': segment_midi_pitches, 
+                                                                'segment_img_path': img_path,
                                                                 'onset': onset}
 
         return df_preprocessed_data
 
 
+    
+    # ---------------------------------------------------------------------------- #
+    #                          Segment specific functions                          #
+    # ---------------------------------------------------------------------------- #
+    def segment_save_img(self, S_db: np.ndarray, segment_start_idx: int, segment_end_idx: int, audio_name: str, split: str) -> os.PathLike:        
+        # Get segment
+        seg_aud = S_db[:, segment_start_idx:segment_end_idx]
+        
+        def min_max_scale(seg_aud, aud, min_val=0, max_val=255):
+            array_std = (seg_aud - aud.min()) / (aud.max() - aud.min())
+            array_scaled = array_std * (max_val - min_val) + min_val
+            return array_scaled
+
+        # min-max scale to fit inside 8-bit range
+        img = min_max_scale(seg_aud, S_db, 0, 255).astype(np.uint8)
+        img = np.flip(img, axis=0) # put low frequencies at the bottom in image
+
+        img = cv2.applyColorMap(img, cv2.COLORMAP_MAGMA)
+        
+        # Save image
+        audio_name = os.path.splitext(os.path.basename(audio_name))[0]
+        img_dir = os.path.join(self.output_img_dir, split)
+        os.makedirs(img_dir, exist_ok=True)
+        
+        img_path = os.path.join(img_dir, f'{audio_name}_start-{segment_start_idx}_end-{segment_end_idx}.png')
+        cv2.imwrite(img_path, img)
+        return img_path
+    
     # ---------------------------------------------------------------------------- #
     #                     Call this function to preprocess data                    #
     # ---------------------------------------------------------------------------- #
@@ -144,7 +186,7 @@ class Data_Preprocessor():
         splits = self.get_splits()
         
         for split_name, split_files in zip(split_names, splits):
-            df_preprocessed_data = pd.DataFrame(columns=['audio_name','audio_sr', 'audio_hop_length', 'audio_transform', 'audio_tempo', 'segment_start_idx', 'segment_end_idx(not_including)', 'segment_midi_pitches', 'onset'])
+            df_preprocessed_data = pd.DataFrame(columns=['audio_path','audio_sr', 'audio_hop_length', 'audio_transform', 'audio_tempo', 'segment_start_idx', 'segment_end_idx(not_including)', 'segment_midi_pitches', 'segment_img_path', 'onset'])
             
             print(f"Preprocessing {split_name} split")
             for audio_name in tqdm.tqdm(split_files, total=len(split_files)):
@@ -153,10 +195,15 @@ class Data_Preprocessor():
                 ground_truths = self.audio_get_ground_truth(audio_name, S_db)
                 tempo = self.audio_get_tempo(audio_name)
                 
-                df_preprocessed_data =  self.audio_concat_segments(tempo, S_db, onset_frames, ground_truths, df_preprocessed_data, audio_name)
+                df_preprocessed_data =  self.audio_concat_segments(tempo, S_db, onset_frames, ground_truths, df_preprocessed_data, audio_name, split_name)
                 
             df_preprocessed_data.to_csv(os.path.join(self.output_dir, f'{split_name}.csv'), index=False)
     
+
+
+# ---------------------------------------------------------------------------- #
+#                               MAPS preprocessor                              #
+# ---------------------------------------------------------------------------- #
 
 class MAPS_Preprocessor(Data_Preprocessor):
     def __init__(self, CONFIG_PATH: os.PathLike):
@@ -193,7 +240,7 @@ class MAPS_Preprocessor(Data_Preprocessor):
         
 if __name__ == '__main__':
     
-    preprocessor = MAPS_Preprocessor(r'C:\University\6th_semester\Bachelor_proj\data_process\utils\config.yaml')
+    preprocessor = MAPS_Preprocessor(r'C:\University\6th_semester\Bachelor_proj\data_process\config.yaml')
     preprocessor.save_preprocessed_data()
 
         

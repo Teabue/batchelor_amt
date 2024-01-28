@@ -67,6 +67,7 @@ def train_model(model, criterion, optimizer, dataset: Dataset, num_epochs=100, d
 def simple_setup(lr = 0.001, wd = 0.0001, device = 'cuda', nr_pitches=128, datadir = 'data_process/output/segments'):
     
     model = Resnext50(nr_pitches)
+    model.train()
     model.to(device)
     
     criterion = nn.BCELoss()
@@ -82,4 +83,4 @@ if __name__ == '__main__':
     print(">>>>> Using device: ", DEVICE)
     model, criterion, optimizer, dataset = simple_setup(device = DEVICE, datadir = 'data_process/output/segments')
     
-    train_model(model, criterion, optimizer, dataset, num_epochs=150, device=DEVICE, batch_size=50)
+    train_model(model, criterion, optimizer, dataset, num_epochs=50, device=DEVICE, batch_size=150)

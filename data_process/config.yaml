@@ -1,3 +1,6 @@
+# Save spectrogram images
+save_spectrogram_imgs: True
+
 # Audio data configs 
 sample_rate: 22050
 hop_length: 512
@@ -11,4 +14,5 @@ random_seed: 420
 
 # Path configs
 output_dir: 'data_process/output/segments'
+output_img_dir: 'data_process/output/segment_imgs'
 MAPS_datapath: 'datasets/maps/MAPS_AkPnCGdD_2/AkPnCGdD/MUS'
