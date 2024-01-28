@@ -1,0 +1,14 @@
+# Audio data configs 
+sample_rate: 22050
+hop_length: 512
+transform: 'cqt'
+
+# This is out of number of songs, not number of segments to keep some more independence
+train_split: 0.8
+val_split: 0.1
+test_split: 0.1
+random_seed: 420
+
+# Path configs
+output_dir: 'data_process/output/segments'
+MAPS_datapath: 'datasets/maps/MAPS_AkPnCGdD_2/AkPnCGdD/MUS'
