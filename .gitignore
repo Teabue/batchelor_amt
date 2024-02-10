@@ -7,6 +7,7 @@ venv/
 datasets/
 data_process/output/
 inference/processed_audio/
+.DS_Store
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

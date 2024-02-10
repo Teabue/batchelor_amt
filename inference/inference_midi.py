@@ -3,9 +3,9 @@ import pandas as pd
 from midiutil.MidiFile import MIDIFile
 import mido
 import json
+import os
 from utils.dataloader import Dataset
 from utils.model import Resnext50
-import os
 import tqdm
 import librosa
 import numpy as np
@@ -301,30 +301,25 @@ def midi_inference_test_set(model_path: os.PathLike, csv_segment_dir: os.PathLik
             mf.writeFile(outf)
             
         print(f"Accuracy: {correct.item() / len(song_segments)*nr_pitches}")
-        
-        
-
-
-
-
-
-
 
 
 if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    model_path = r"C:\University\6th_semester\Bachelor_proj\classification\models\model_best.pth"
+    model_path = "../classification/models/model_best.pth"
+    # model_path = r"C:\University\6th_semester\Bachelor_proj\classification\models\model_best.pth"
     
     inference_on = "new_song" # "new_song" or "test_set"
     
     if inference_on == "new_song":
-        AUDIO_PATH = r"C:\University\6th_semester\Bachelor_proj\river.mp3"
+        AUDIO_PATH = "../river.mp3"
+        # AUDIO_PATH = r"C:\University\6th_semester\Bachelor_proj\river.mp3"
         BPM = 65
         midi_inference_new_song(model_path=model_path, audio_path=AUDIO_PATH, nr_pitches=128, device=device, bpm=BPM)
         
     elif inference_on == "test_set":
-        CSV_SEGMENT_DIR = r"C:\University\6th_semester\Bachelor_proj\data_process\output\segments"
+        CSV_SEGMENT_DIR = "../data_process/output/segments"
+        # CSV_SEGMENT_DIR = r"C:\University\6th_semester\Bachelor_proj\data_process\output\segments"
         
         midi_inference_test_set(model_path=model_path, csv_segment_dir=CSV_SEGMENT_DIR, nr_pitches=128, device=device)
     

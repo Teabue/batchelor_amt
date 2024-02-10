@@ -239,8 +239,10 @@ class MAPS_Preprocessor(Data_Preprocessor):
         return tempo
         
 if __name__ == '__main__':
+    path = "config.yaml"
+    # path = r'C:\University\6th_semester\Bachelor_proj\data_process\config.yaml'
     
-    preprocessor = MAPS_Preprocessor(r'C:\University\6th_semester\Bachelor_proj\data_process\config.yaml')
+    preprocessor = MAPS_Preprocessor(path)
     preprocessor.save_preprocessed_data()
 
         
