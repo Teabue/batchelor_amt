@@ -1,0 +1,5 @@
+
+num_workers: 4
+transform_method: 'logmel' # 'logmel' or 'cqt'
+sample_rate: 1600
+hop_width: 128 
