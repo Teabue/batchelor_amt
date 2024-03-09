@@ -5,8 +5,9 @@ The vocabulary containes several eventtypes
 Keep a dictionairy of what ranges of tokens are what eventtype
 The use that event.translate_from_token(token) to get the event value.
 """
-
-
+# TODO: Add time shift to the vocabulary in a way that makes sense :^)
+# TODO: Loading tuples from a yaml file is irritating >:(
+    
 class EventType:
     """
     Event
@@ -73,7 +74,27 @@ class Vocabulary:
                     event_value = event.translate_from_token(token)
                     translated_sequence.append((event.event_type, event_value))
                     break
+        return translated_sequence
     
 
+if __name__ == "__main__":
+    import yaml
 
     
+    with open('Transformer/configs/vocab_config.yaml', 'r') as file:
+        config = yaml.safe_load(file)
+    
+    vocab = Vocabulary(config)
+    
+    vocab.define_vocabulary()
+    
+    print("Vocabulary ranges: ")
+    for token_range, event in vocab.vocabulary.items():
+        print(f"Event: {event.event_type}, Range: {token_range}, Min-max: {event.min_max_values}")
+    
+    
+    token_sequence = [4,10,1,130,4,10,131,9,10,12,130,9,10,12,0]
+    
+    print("Translated sequence: ", vocab.translate_sequence(token_sequence))
+    for translated_event in vocab.translate_sequence(token_sequence):
+        print(f"Event: {translated_event[0]}, Value: {translated_event[1]}")

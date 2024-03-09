@@ -3,8 +3,8 @@ special_tokens:
   - ET
 
 event_types: 
-  pitch: (0,127)
-  offset_onset: (0, 1)  # 1 is onset, 0 is offset
+  pitch: [0,127]
+  offset_onset: [0, 1]  # 1 is onset, 0 is offset
 
 
 
