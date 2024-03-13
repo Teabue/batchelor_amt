@@ -60,8 +60,10 @@ _Special characters:_
 - When doing pitches, always order them by pitch value from lowest first to highest last
 - If there are both onsets and offsets for one time shift, then always keep whatever mode was on, then change the mode
 - Always declare already playing pitches first then use ET token
+    - Do the normal time shifting and append the pitch tokens. (ignore all tokens in the sequence until this part has been handled) and the normal token-timeshifting will assume it starts from 0 after ET has been done.
+        - we could just add a note_offset thing to make stuff easier to parse in inference
 - Time shift comes BEFORE onsets and offset tokens
-- Time shifts occur only when there are other events. So if there are no offsets or onsets then there won't be a time shift token.
+- A sequence will be time shifted to its end duration if there are no notes that are played.
 
 
 

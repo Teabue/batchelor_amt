@@ -1,5 +1,14 @@
 
 num_workers: 4
 transform_method: 'logmel' # 'logmel' or 'cqt'
-sample_rate: 1600
-hop_width: 128 
+sr: 1600 # sample rate
+n_fft: 2048 # number of samples used for each fourier transform
+hop_length: 512 # number of samples between successive frames
+n_mels: 128 # number of mel bands to generate
+
+
+# List of dataset directories
+data_dir: 
+  - datasets/maestro 
+
+output_dir: 'Transformer/data_processed'  # Preprocessed data will be saved to output_dir/spectrograms/ and output_dir/labels/
