@@ -1,0 +1,15 @@
+
+# ------------------------------- Train configs ------------------------------ #
+num_epochs: 30
+batch_size: 100
+lr: 0.0001
+run_save_path: '/work3/s214629/run_a100' # This will create a folder with run_1/losses with train_losses and val_losses as well as run_1/models
+data_dir: '/work3/s214629/preprocessed_data' # This is the path to the preprocessed data directory
+# -------------------------- Model specific configs -------------------------- #
+n_mel_bins: 128
+d_model: 512
+num_heads: 8
+num_layers: 6
+d_ff: 2048
+max_seq_length: 1024 # doesn't really matter, can be set to whatever as long as its larger than the longest sequence - it's a pteprocess step for PE
+dropout: 0.1
