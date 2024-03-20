@@ -1,0 +1,6 @@
+librosa
+tqdm
+pandas
+scikit-learn
+mido
+pyyaml

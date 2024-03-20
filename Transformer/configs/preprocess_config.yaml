@@ -1,4 +1,4 @@
-num_workers: 4
+num_workers: 16
 
 # ---------------------------------- Splits ---------------------------------- #
 train: 0.8
@@ -10,14 +10,22 @@ seed: 42
 preprocess_method: 'logmel' # 'logmel' or 'cqt'
 sr: 22050 # sample rate
 n_fft: 2048 # number of samples used for each fourier transform
-hop_length: 1920 # hop_length. The number of samples between successive frames is n_fft - hope_length
+hop_length: 512 # hop_length. The number of samples between successive frames is n_fft - hope_length
 n_mels: 128 # number of mel bands to generate
 
 
 # List of dataset directories
 data_dirs:
-  - C:/University/batchelor_amt/datasets/test_maestro/folder1
-  - C:/University/batchelor_amt/datasets/test_maestro/folder2
+  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2004
+  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2006
+  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2008
+  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2009
+  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2011
+  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2013
+  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2014
+  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2015
+  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2017
+  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2018
 
 audio_file_extension: '.wav'
-output_dir: 'Transformer/preprocessed_data'  # Preprocessed data will be saved to output_dir/spectrograms/ and output_dir/labels/
+output_dir: '/work3/s214629/preprocessed_data'  # Preprocessed data will be saved to output_dir/spectrograms/ and output_dir/labels/

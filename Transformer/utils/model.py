@@ -1,21 +1,19 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.utils.data as data
 import math
-import copy
-
 
 class Transformer(nn.Module):
-    def __init__(self, src_vocab_size, tgt_vocab_size, d_model, num_heads, num_layers, d_ff, max_seq_length, dropout):
+    def __init__(self, n_mel_bins, tgt_vocab_size, d_model, num_heads, num_layers, d_ff, max_seq_length, dropout, device):
         super(Transformer, self).__init__()
+        self.device = device
         
         # We get embeddings by using a Dense layer 
-        self.encoder_embedding = nn.Linear(src_vocab_size, d_model)
-        self.decoder_embedding = nn.Linear(tgt_vocab_size, d_model)        
+        self.encoder_embedding = nn.Linear(n_mel_bins, d_model)
+        # self.decoder_embedding = nn.Linear(tgt_vocab_size, d_model)        
         
         # self.encoder_embedding = nn.Embedding(src_vocab_size, d_model)
-        # self.decoder_embedding = nn.Embedding(tgt_vocab_size, d_model)
+        self.decoder_embedding = nn.Embedding(tgt_vocab_size, d_model)
         self.positional_encoding = PositionalEncoding(d_model, max_seq_length)
 
         self.encoder_layers = nn.ModuleList([EncoderLayer(d_model, num_heads, d_ff, dropout) for _ in range(num_layers)])
@@ -25,11 +23,11 @@ class Transformer(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def generate_mask(self, src, tgt):
-        src_mask = (src != 0).unsqueeze(1).unsqueeze(2)
-        tgt_mask = (tgt != 0).unsqueeze(1).unsqueeze(3)
+        src_mask = torch.any((src != -1), axis=-1).unsqueeze(1).unsqueeze(2) # special mask for spectrogram
+        tgt_mask = (tgt != -1).unsqueeze(1).unsqueeze(3)
         seq_length = tgt.size(1)
         nopeak_mask = (1 - torch.triu(torch.ones(1, seq_length, seq_length), diagonal=1)).bool()
-        tgt_mask = tgt_mask & nopeak_mask
+        tgt_mask = tgt_mask & nopeak_mask.to(self.device)
         return src_mask, tgt_mask
 
     def forward(self, src, tgt):
@@ -174,30 +172,53 @@ class PositionalEncoding(nn.Module):
 
     
 if __name__ == "__main__":
-    src_vocab_size = 5000
-    tgt_vocab_size = 5000
+    import yaml
+    import tqdm
+    from utils.vocabularies import Vocabulary
+    from utils.data_loader import TransformerDataset
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    n_mel_bins = 128
     d_model = 512
     num_heads = 8
     num_layers = 6
     d_ff = 2048
-    max_seq_length = 100
+    max_seq_length = 256 # doesn't really matter, can be set to whatever as long as its larger than the longest sequence - it's a pteprocess step for PE
     dropout = 0.1
 
-    transformer = Transformer(src_vocab_size, tgt_vocab_size, d_model, num_heads, num_layers, d_ff, max_seq_length, dropout)
-
-    # Generate random sample data
-    src_data = torch.randint(1, src_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
-    tgt_data = torch.randint(1, tgt_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
-
-    criterion = nn.CrossEntropyLoss(ignore_index=0)
+    with open('Transformer/configs/vocab_config.yaml', 'r') as file:
+        config = yaml.safe_load(file)
+    vocab = Vocabulary(config)
+    vocab.define_vocabulary()
+    
+    tgt_vocab_size = vocab.vocab_size
+    
+    
+    transformer = Transformer(n_mel_bins, tgt_vocab_size, d_model, num_heads, num_layers, d_ff, max_seq_length, dropout)
+    criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(transformer.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
+    dataset = TransformerDataset(r'/work3/s214629/preprocessed_data_old')
 
     transformer.train()
 
+    num_epochs = 50
+    batch_size = 20
     for epoch in range(100):
+            
+        train_loader = dataset.get_split('train', batch_size=batch_size, shuffle=True)
+        pbar = tqdm.tqdm(train_loader, total = len(train_loader), \
+                         desc=f'Train: Loss: [{1}], Epochs: {epoch}/{num_epochs}', leave = False)    
+
         optimizer.zero_grad()
-        output = transformer(src_data, tgt_data[:, :-1])
-        loss = criterion(output.contiguous().view(-1, tgt_vocab_size), tgt_data[:, 1:].contiguous().view(-1))
-        loss.backward()
-        optimizer.step()
-        print(f"Epoch: {epoch+1}, Loss: {loss.item()}")
+        losses = []
+        for spectrograms, tokens in pbar:#iter(train_loader):
+            spectrograms = spectrograms.to(device)
+            tokens = tokens.to(device)
+            
+            output = transformer(src=spectrograms, tgt=tokens)
+            loss = criterion(output.contiguous().view(-1, tgt_vocab_size), tokens.contiguous().view(-1))
+            loss.backward()
+            optimizer.step()
+            print(f"Epoch: {epoch+1}, Loss: {loss.item()}")
