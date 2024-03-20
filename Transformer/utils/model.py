@@ -24,7 +24,7 @@ class Transformer(nn.Module):
 
     def generate_mask(self, src, tgt):
         src_mask = torch.any((src != -1), axis=-1).unsqueeze(1).unsqueeze(2) # special mask for spectrogram
-        tgt_mask = (tgt != -1).unsqueeze(1).unsqueeze(3)
+        tgt_mask = (tgt != 0).unsqueeze(1).unsqueeze(3) # batch_size x 1 x tgt_seq_length x 1
         seq_length = tgt.size(1)
         nopeak_mask = (1 - torch.triu(torch.ones(1, seq_length, seq_length), diagonal=1)).bool()
         tgt_mask = tgt_mask & nopeak_mask.to(self.device)

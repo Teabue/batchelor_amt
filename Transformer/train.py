@@ -87,7 +87,7 @@ def simple_setup(lr = 0.01, device = 'cuda', nr_pitches=128, datadir = 'data_pro
     model.train()
     model.to(device)
     
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(ignore_index=0) # we ignore the padding token
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     dataset = TransformerDataset(datadir)

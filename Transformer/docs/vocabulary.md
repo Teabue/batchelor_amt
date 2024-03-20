@@ -20,7 +20,8 @@ The decoder outputs will be an integer token for each word. The meaning of the i
 ### Example:
 A config file of:
 ```
-SpecialTokens: 
+SpecialTokens:
+  - PAD
   - EOS
   - ET
 
