@@ -1,5 +1,6 @@
 special_tokens:
-  - PAD # Only used in dataloader 
+  - PAD # Only used in dataloader
+  - SOS
   - EOS
   - ET
 

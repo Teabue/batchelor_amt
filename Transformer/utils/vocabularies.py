@@ -76,6 +76,7 @@ class Vocabulary:
         if len(df_sequence) == 0:
             duration_in_ten_ms = np.floor(duration * 100)
             token_sequence = []
+            token_sequence.append(self.vocabulary['SOS'][0].translate_value_to_token(0))
             token_sequence.append(self.vocabulary['time_shift'][0].translate_value_to_token(duration_in_ten_ms))
             token_sequence.append(self.vocabulary['EOS'][0].translate_value_to_token(0))
             return token_sequence, None
@@ -107,6 +108,8 @@ class Vocabulary:
         
         last_offset_onset_value = None
         token_sequence = []
+        # Add the start of sequence token
+        token_sequence.append(self.vocabulary['SOS'][0].translate_value_to_token(0))
 
         # ----------------------------- Declare tie notes ----------------------------- #
         if df_tie_notes is not None:
@@ -171,7 +174,7 @@ class Vocabulary:
             
                 
 
-    def translate_sequence_token_to_events(self, sequence: list[int]):
+    def translate_sequence_token_to_events(self, sequence: list[int]) -> list[tuple[str, int]]:
         """Translates a sequence of tokens to a sequence of events
         Used only in inference to create midi 
         Args:

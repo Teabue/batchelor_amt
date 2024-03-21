@@ -77,11 +77,15 @@ class DataPreprocessor:
 if __name__ == '__main__':
     """ Run the file from the repo root folder"""
     import yaml
-    
+    import shutil 
     # Load the YAML file
-    with open("Transformer/configs/preprocess_config.yaml", 'r') as f:
+    with open('Transformer/configs/preprocess_config.yaml', 'r') as f:
         configs = yaml.safe_load(f)
-        
+    
+    # Copy over the configs used for preprocessing 
+    os.makedirs(configs['output_dir'], exist_ok=True)
+    shutil.copy('Transformer/configs/preprocess_config.yaml', os.path.join(configs['output_dir'], "train_config.yaml"))
+    
     preprocessor = DataPreprocessor(configs)
     
     preprocessor.preprocess()

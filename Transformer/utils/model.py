@@ -178,7 +178,6 @@ if __name__ == "__main__":
     from utils.data_loader import TransformerDataset
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     n_mel_bins = 128
     d_model = 512

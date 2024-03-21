@@ -76,7 +76,7 @@ def train_model(model,
             
         if epoch % save_model_every_num_epoch == 0:
             torch.save(model.state_dict(), os.path.join(MODEL_SAVE_DIR, f'checkpoint_model.pth'))
-            
+        
         # ------------------------------ Validate model ------------------------------ #
         val_loader = dataset.get_split('val', batch_size=batch_size, shuffle=True)
         pbar = tqdm.tqdm(iter(val_loader), total = len(val_loader), \
@@ -108,12 +108,12 @@ def train_model(model,
         
         # Save validation loss
         with open(VAL_LOSS_PATH, 'a') as f:
-            f.write(f'{epoch}, mean_val_loss\n')
+            f.write(f'{epoch}, {mean_val_loss}\n')
         
 
         if mean_val_loss < best_loss:
             best_loss = mean_val_loss
-            torch.save(model.state_dict(), os.path.join(MODEL_SAVE_DIR, f'model_best_epoch-{epoch}.pth'))  
+            torch.save(model.state_dict(), os.path.join(MODEL_SAVE_DIR, f'model_best.pth'))  
 
 
 def simple_setup(device = 'cuda', 
@@ -158,7 +158,8 @@ if __name__ == '__main__':
     # Copy the config file to the run_save_path
     os.makedirs(config['run_save_path'], exist_ok=True)
     shutil.copy("Transformer/configs/train_config.yaml", os.path.join(config['run_save_path'], "train_config.yaml"))
-    
+    shutil.copy("Transformer/configs/vocab_config.yaml", os.path.join(config['run_save_path'], "vocab_config.yaml"))
+    torch.manual_seed(config['seed'])
     
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(">>>>> Using device: ", DEVICE)
