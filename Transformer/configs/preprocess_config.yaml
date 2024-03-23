@@ -1,4 +1,5 @@
 num_workers: 16
+max_sequence_length: 512
 
 # ---------------------------------- Splits ---------------------------------- #
 train: 0.8
@@ -28,4 +29,4 @@ data_dirs:
   - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2018
 
 audio_file_extension: '.wav'
-output_dir: '/work3/s214629/preprocessed_data_SOS'  # Preprocessed data will be saved to output_dir/spectrograms/ and output_dir/labels/
+output_dir: '/work3/s214629/preprocessed_data_best'  # Preprocessed data will be saved to output_dir/spectrograms/ and output_dir/labels/

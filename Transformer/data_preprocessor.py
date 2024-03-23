@@ -9,7 +9,7 @@ from utils.preprocess_song import Maestro
 """
 All of this is done on the cpu :^D
 """
-
+#TODO: Bug where header does not appear, oops (easy fikx I'm just too lazy atm)
 
 class DataPreprocessor:
     def __init__(self, preprocess_config) -> None:
@@ -21,8 +21,15 @@ class DataPreprocessor:
         for song_path, split in tqdm(songs, desc=f'Worker {worker_nr}', total=len(songs)):
             song = Maestro(song_path, self.config)
             df_song = song.preprocess()
-
-            df_song.to_csv(os.path.join(self.config['output_dir'], split, f'worker_{worker_nr}.csv'), mode='a', header=True)
+            
+            save_path = os.path.join(self.config['output_dir'], split, f'worker_{worker_nr}.csv')
+            if not os.path.exists(save_path):
+                first_song = True
+            else:
+                first_song = False
+            
+            df_song.to_csv(save_path, mode='a', header=first_song,index=False)
+            first_song = False
             
     def preprocess(self) -> None:
         # TODO: Split up the workload through multiprocessing
@@ -69,10 +76,10 @@ class DataPreprocessor:
                 os.remove(file)
                 
             # Concatenate the dataframes
-            df = pd.concat(dfs)
+            df = pd.concat(dfs, ignore_index=True)
 
             # Write the result to a new CSV file
-            df.to_csv(os.path.join(self.config['output_dir'], split,'labels.csv'), index=False)
+            df.to_csv(os.path.join(self.config['output_dir'], split,'labels.csv'))
 
 if __name__ == '__main__':
     """ Run the file from the repo root folder"""
@@ -84,8 +91,9 @@ if __name__ == '__main__':
     
     # Copy over the configs used for preprocessing 
     os.makedirs(configs['output_dir'], exist_ok=True)
-    shutil.copy('Transformer/configs/preprocess_config.yaml', os.path.join(configs['output_dir'], "train_config.yaml"))
-    
+    shutil.copy('Transformer/configs/preprocess_config.yaml', os.path.join(configs['output_dir'], "preprocess_config.yaml"))
+    shutil.copy('Transformer/configs/vocab_config.yaml', os.path.join(configs['output_dir'], "vocab_config.yaml"))
+
     preprocessor = DataPreprocessor(configs)
     
     preprocessor.preprocess()

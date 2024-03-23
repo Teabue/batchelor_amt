@@ -29,12 +29,27 @@ class Transformer(nn.Module):
         nopeak_mask = (1 - torch.triu(torch.ones(1, seq_length, seq_length), diagonal=1)).bool()
         tgt_mask = tgt_mask & nopeak_mask.to(self.device)
         return src_mask, tgt_mask
-
-    def forward(self, src, tgt):
+    
+    def get_sequence_predictions(self, src, tgt, max_seq_length) -> torch.Tensor:
+        for i in range(max_seq_length):
+            output = self.forward(src, tgt, training=False)
+            output = output[:,-1,:].unsqueeze(0)
+            output = torch.argmax(output, dim=-1)
+            if output.squeeze().item() == 2:
+                # if predicted end of sequence
+                return tgt
+            tgt = torch.cat([tgt, output], dim=1)
+        return tgt
+        
+    def forward(self, src, tgt, training=True):
         src_mask, tgt_mask = self.generate_mask(src, tgt)
-        src_embedded = self.dropout(self.positional_encoding(self.encoder_embedding(src)))
-        tgt_embedded = self.dropout(self.positional_encoding(self.decoder_embedding(tgt)))
-
+        if training:
+            src_embedded = self.dropout(self.positional_encoding(self.encoder_embedding(src)))
+            tgt_embedded = self.dropout(self.positional_encoding(self.decoder_embedding(tgt)))
+        else:
+            src_embedded = self.positional_encoding(self.encoder_embedding(src))
+            tgt_embedded = self.positional_encoding(self.decoder_embedding(tgt))
+            
         enc_output = src_embedded
         for enc_layer in self.encoder_layers:
             enc_output = enc_layer(enc_output, src_mask)

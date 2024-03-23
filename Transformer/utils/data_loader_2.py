@@ -23,7 +23,7 @@ class TransformerDataset(torch.utils.data.Dataset):
     def load_spectrograms(self):
         song_names = []
         for split in ['train', 'val', 'test']:
-            data_df = pd.read_csv(os.path.join(self.data_dir, split, 'labels.csv'))
+            data_df = pd.read_csv(os.path.join(self.data_dir, split, 'labels.csv'), index_col=0)
             song_names.extend(data_df['song_name'].unique())
         # NOTE: We don't have to further unique it as train/val/test were split up by songs, not their segments
         

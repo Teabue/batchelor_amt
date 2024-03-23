@@ -4,7 +4,9 @@ import numpy as np
 import pandas as pd
 import mido
 import yaml
+import torch
 from utils.vocabularies import Vocabulary
+from torch.nn.utils.rnn import pad_sequence
 
 class Song:
     def __init__(self, song_path: str | os.PathLike, preprocess_config: dict):
@@ -51,6 +53,14 @@ class Song:
         np.save(save_path, spectrogram)
         return spectrogram
         
+    def preprocess_inference_new_song(self, sequence_size=128) -> torch.Tensor:
+        spectrogram = self.compute_spectrogram()
+        spectrogram = spectrogram.T
+        spectrogram_slices = torch.from_numpy(spectrogram).split(128,0)
+
+        spectrogram_slices = pad_sequence(list(spectrogram_slices), batch_first=True, padding_value=-1)
+        
+        return spectrogram_slices
         
     def compute_labels_and_segments(self) -> None:
         NotImplementedError("This method should be implemented in the subclass")
@@ -100,9 +110,8 @@ class Maestro(Song):
         frame_times = librosa.frames_to_time(range(spectrogram.shape[1]), sr=self.config['sr'], hop_length=self.config['hop_length'])
 
         # ---------------------------- Calculate sequences --------------------------- #
-        # TODO: CHANGE THIS TO A CONFIG LATER
         min_size = 2
-        max_size = 100
+        max_size = self.config['max_sequence_length']
         
         
         total_size = spectrogram.shape[1]
