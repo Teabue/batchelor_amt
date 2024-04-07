@@ -8,6 +8,8 @@ datasets/
 data_process/output/
 inference/processed_audio/
 .DS_Store
+/models
+/.vscode
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

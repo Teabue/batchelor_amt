@@ -8,7 +8,6 @@ The use that event.translate_from_token(token) to get the event value.
 import pandas as pd
 import numpy as np
 
-
 # TODO: Add time shift to the vocabulary in a way that makes sense :^)
 # TODO: Loading tuples from a yaml file is irritating >:(
 # TODO: I'm 100% sure all of this could be optimized with at least 200% :^)
@@ -171,9 +170,7 @@ class Vocabulary:
                 
         return token_sequence, df_tie_notes
                 
-            
                 
-
     def translate_sequence_token_to_events(self, sequence: list[int]) -> list[tuple[str, int]]:
         """Translates a sequence of tokens to a sequence of events
         Used only in inference to create midi 
@@ -210,7 +207,14 @@ if __name__ == "__main__":
         print(f"Event: {event.event_type}, Range: {token_range}, Min-max: {event.min_max_values}")
     
     print('-'*40)
-    token_sequence = [4,10,1,130,4,10,131,9,10,12,130,9,10,12,0]
+    token_sequence = [1, 
+                      133, 108-12*4, 382, 
+                      132, 108-12*4, 1927, 
+                      133, 22+12*2, 26+12*2, 491, 
+                      132, 22+12*2, 
+                      133, 37+12, 32+12, 234, 
+                      132, 26+12*2, 37+12, 32+12, 13+12*3, 
+                      2, 0]
     
     print("Translated sequence: ")
     for translated_event in vocab.translate_sequence_token_to_events(token_sequence):

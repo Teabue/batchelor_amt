@@ -12,5 +12,5 @@ d_model: 512
 num_heads: 8
 num_layers: 6
 d_ff: 2048
-max_seq_length: 1024 # doesn't really matter, can be set to whatever as long as its larger than the longest sequence - it's a pteprocess step for PE
+max_seq_length: 4096 # 1024 # doesn't really matter, can be set to whatever as long as its larger than the longest sequence - it's a pteprocess step for PE
 dropout: 0.1
