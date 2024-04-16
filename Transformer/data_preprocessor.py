@@ -4,7 +4,7 @@ import pandas as pd
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from itertools import cycle
-from utils.preprocess_song import Maestro
+from utils.preprocess_song import Maestro, MuseScore
 
 """
 All of this is done on the cpu :^D
@@ -19,7 +19,13 @@ class DataPreprocessor:
         # TODO: Make this flexible for other datasets
         
         for song_path, split in tqdm(songs, desc=f'Worker {worker_nr}', total=len(songs)):
-            song = Maestro(song_path, self.config)
+            if self.config["dataset"] == "Maestro":
+                song = Maestro(song_path, self.config)
+            elif self.config["dataset"] == "MuseScore":
+                song = MuseScore(song_path, self.config)
+            else:
+                raise ValueError("Invalid dataset")
+            
             df_song = song.preprocess()
             
             save_path = os.path.join(self.config['output_dir'], split, f'worker_{worker_nr}.csv')

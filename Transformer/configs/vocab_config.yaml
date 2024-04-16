@@ -7,8 +7,7 @@ special_tokens:
 event_types: 
   pitch: [0,127]
   offset_onset: [0, 1]  # 1 is onset, 0 is offset
-  time_shift: [1, 3000] # TODO: change this to be more flexible, for now it's 1 idx is equal 10 ms
+  beat: [1, 160] # The chronological order of 32 notes and 8 tuplets for 4 bars
 
-
-
+subdivision: 0.125 # 32nd note
   
