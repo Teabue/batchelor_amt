@@ -111,6 +111,7 @@ class Vocabulary:
         # tuplet_rows = df_sequence[np.isclose(df_sequence['time'].astype(float) % subdivision_tuplet, 0)]
         # tuplet_rows = tuplet_rows.drop(subdivision_rows.index, errors='ignore')
         
+        # How many tuplets did we pass on the way (not including 1-beat tuplets)
         df_sequence['increment'] = df_sequence['time'] // (1/3) - np.floor(df_sequence['time'])  
         # df_sequence['time'] = np.floor(df_sequence['time'] / subdivision) + df_sequence['increment']
         
@@ -138,6 +139,7 @@ class Vocabulary:
         cur_beat = 0
         # First group by beats
         for beat_value, group in df_sequence.groupby('time'):
+            # Number of subdivisions plus the off-beat tuplets we passed on the way
             beat_token = (np.floor(group['time'] / subdivision) + group['increment']).iloc[0]
             
             # Update which beat we are currently on

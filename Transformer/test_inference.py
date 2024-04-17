@@ -78,32 +78,19 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]], bpm: 
     bass_staff.clef = clef.BassClef()
     
     # TODO: Hardcoded. Make it flexible
-    time_sig = meter.TimeSignature('4/4')
-    treble_staff.insert(0, time_sig)
-    bass_staff.insert(0, time_sig)
+    treble_staff.timeSignature = meter.TimeSignature('4/4')
+    bass_staff.timeSignature = meter.TimeSignature('4/4')
     
     # Add the metronome mark to the score
     metronome_mark = tempo.MetronomeMark(number=bpm)
-    treble_staff.insertIntoNoteOrChord(0, metronome_mark)
-    bass_staff.insertIntoNoteOrChord(0, metronome_mark)
+    treble_staff.insert(0, metronome_mark)
+    bass_staff.insert(0, metronome_mark)
     
     df = _prepare_data_frame(event_sequence)
     print("Dataframe prepared!")
     
     # Convert time to quarternote length
-    df['duration'] = (df['offset'] - df['onset']) / (60 / bpm)
-    
-    # Snap the notes to the nearest 1/32th note - NOTE: 
-    subdivision = 3 # 3 = 32th notes
-    df['duration'] = df['duration'].apply(lambda x: round(x * 2**subdivision) / 2**subdivision if x % 2**(-subdivision) != 0 else x)
-    df.sort_values('onset', inplace=True)
-    
-    # TODO: Fix this. It's a hacky solution to get around the fact that the first note is a short rest
-    if df['full_note'][0] == 'Rest' and abs(df['duration'][0] - 0.125) < df['duration'][0]:
-        # Recalibrate the onset
-        df['onset'] = df['onset'] - df['offset'].iloc[0]
-        df['offset'] = df['offset'] - df['offset'].iloc[0]
-        df = df.iloc[1:]
+    df['duration'] = (df['offset'] - df['onset'])
     
     for idx, row in df.iterrows():
         if row['duration'] == 0:
@@ -115,19 +102,26 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]], bpm: 
             xml_note = note.Note(row['full_note'])
             xml_note.duration = duration.Duration(row['duration'])
         
-        # Snap the onset to the nearest 1/32th note
-        onset_time_in_quarternote = row['onset'] / (60 / bpm)
-        if onset_time_in_quarternote % 2**(-subdivision) != 0:
-            onset_time_in_quarternote = round(onset_time_in_quarternote * 2**subdivision) / 2**subdivision
-        
         # Evenly distribute between treble and bass cleff - could be optimized
-        if row['octave'] == '-':
-            treble_staff.insertIntoNoteOrChord(onset_time_in_quarternote, xml_note)
-            bass_staff.insertIntoNoteOrChord(onset_time_in_quarternote, xml_note)
-        elif row['octave'] >= '4':
-            treble_staff.insertIntoNoteOrChord(onset_time_in_quarternote, xml_note)
+        # Depending on the predicted duration of the df, the insert method should act accordingly
+        if (row['onset'] in df.drop(idx)['onset'].values and row['duration'] in df.drop(idx)['duration'].values):
+            if row['octave'] == '-':
+                treble_staff.insertIntoNoteOrChord(row['onset'], xml_note)
+                bass_staff.insertIntoNoteOrChord(row['onset'], xml_note)
+            elif row['octave'] >= '4':
+                treble_staff.insertIntoNoteOrChord(row['onset'], xml_note)
+            else:
+                bass_staff.insertIntoNoteOrChord(row['onset'], xml_note)
         else:
-            bass_staff.insertIntoNoteOrChord(onset_time_in_quarternote, xml_note)
+            if row['octave'] == '-':
+                # Let MuseScore handle the rests
+                continue
+                treble_staff.insert(row['onset'], xml_note)
+                bass_staff.insert(row['onset'], xml_note)
+            elif row['octave'] >= '4':
+                treble_staff.insert(row['onset'], xml_note)
+            else:
+                bass_staff.insert(row['onset'], xml_note)
         
     # Connect the streams to a score
     score = stream.Score()        
@@ -138,9 +132,6 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]], bpm: 
     piano = layout.StaffGroup([treble_staff, bass_staff], symbol='brace')
     score.insert(0, piano)
 
-    # Perhaps get inspiration from the quantize function
-    # score_quantized = score.quantize(quarterLengthDivisors=[4, 3], processDurations=True, processOffsets=True, inPlace=False, recurse=True)
-    
     # Change pitches to the analyzed key 
     # NOTE: If the song changes key throughout, it may screw-up the key analysis
     proposed_key = score.analyze('key')
@@ -178,7 +169,7 @@ def _update_pitches(score, key_sig) -> stream.Score:
 def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
     df = pd.DataFrame(columns=['full_note', 'pitch', 'octave', 'onset', 'offset'])
     
-    time = 0
+    beat = 0
     notes_to_concat = {}
     onset_switch = False
     for event, value in event_sequence:
@@ -197,7 +188,7 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
             
             if onset_switch:
                 # Save the note with the corresponding onset time
-                notes_to_concat[note_] = time
+                notes_to_concat[note_] = beat
             else:
                 if note_ not in notes_to_concat.keys():
                     # This shouldn't happen but I'll allow it and skip it
@@ -206,19 +197,28 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
                 
                 # Remove from the dict and add to the dataframe
                 df_onset = notes_to_concat.pop(note_)
-                df = pd.concat([df, pd.DataFrame([{'full_note': note_, 'pitch': note_value, 'octave': octave_value, 'onset': df_onset, 'offset': time}])], ignore_index=True)
+                df = pd.concat([df, pd.DataFrame([{'full_note': note_, 'pitch': note_value, 'octave': octave_value, 'onset': df_onset, 'offset': beat}])], ignore_index=True)
         
-        elif event == "time_shift":
-            # Convert the time shift to seconds
-            time_shift_in_seconds = value * 10 / 1000 # 1 bin is 10 ms
+        elif event == "beat":
+            # Convert the time shift to quarternote fractions
+            # Tuplets # NOTE: These values are for 32nd note subdivision
+            if value % 10 == 3:
+                new_beat = value // 10 + 1/3
+            elif value % 10 == 7:
+                new_beat = value // 10 + 2/3
+            
+            # Not a tuplet
+            else:
+                # How many tuplets on the way to the current bar + how many on the current bar
+                decremented_value = value // 10 * 2 + np.floor(value % 10 / 4)
+                new_beat = (value - decremented_value) * vocab_configs['subdivision']
             
             # If we are not onsetting and skipping in time, we have a rest!
             if not onset_switch:
-                df = pd.concat([df, pd.DataFrame([{'full_note': "Rest", 'pitch': "-", 'octave': "-", 'onset': time, 'offset': time + time_shift_in_seconds}])], ignore_index=True)
+                df = pd.concat([df, pd.DataFrame([{'full_note': "Rest", 'pitch': "-", 'octave': "-", 'onset': beat, 'offset': new_beat}])], ignore_index=True)
+
+            beat = new_beat
             
-            # Update the current time
-            time += time_shift_in_seconds
-    
     return df
 
 
@@ -318,6 +318,16 @@ if __name__ == '__main__':
                     break
     else:
         all_sequence_events = np.load('/Users/helenakeitum/Desktop/saved_seq_events.npy', allow_pickle=True)
-        
-    translate_events_to_sheet_music(all_sequence_events, bpm = bpm_tempo)
+    
+    token_sequence = [1, 
+                      133, 108-12*4, 135, 
+                      132, 108-12*4, 137, 
+                      133, 22+12*2, 26+12*2, 170, 
+                      132, 22+12*2, 
+                      133, 37+12, 32+12, 175, 
+                      132, 26+12*2, 37+12, 32+12, 13+12*3, 
+                      2, 0]
+    events = vocab.translate_sequence_token_to_events(token_sequence)
+    
+    translate_events_to_sheet_music(events, bpm = bpm_tempo)
     # create_midi_from_model_events(all_sequence_events, bpm_tempo, output_dir="/Users/helenakeitum/Desktop", onset_only=False)

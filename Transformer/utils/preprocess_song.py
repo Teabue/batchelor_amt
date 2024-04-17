@@ -218,8 +218,6 @@ class MuseScore(Song):
         return df
     
     def compute_labels_and_segments(self, df, spectrogram, bars = 1):
-        subdivision = 0.125 # 32'th notes
-        
         # Extract tempo(s) from the score
         mm_marks = self.score.metronomeMarkBoundaries()
         
