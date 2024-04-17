@@ -200,18 +200,25 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
                 df = pd.concat([df, pd.DataFrame([{'full_note': note_, 'pitch': note_value, 'octave': octave_value, 'onset': df_onset, 'offset': beat}])], ignore_index=True)
         
         elif event == "beat":
+            notes_per_beat = (1 / vocab_configs['subdivision'] + 2) # +2 because there are always 2 eight note tuplets
+            
+            # Find indices of the eight tuplets
+            sub_beats = np.arange(0, 1, vocab_configs['subdivision'])
+            first_tuplet = np.argwhere(sub_beats > 1/3)[0][0]
+            second_tuplet = np.argwhere(sub_beats > 2/3)[0][0] + 1 # + 1 because we have already found the first tuplet
+            tuplet_indices = np.array([first_tuplet, second_tuplet])
+            
             # Convert the time shift to quarternote fractions
-            # Tuplets # NOTE: These values are for 32nd note subdivision
-            if value % 10 == 3:
-                new_beat = value // 10 + 1/3
-            elif value % 10 == 7:
-                new_beat = value // 10 + 2/3
+            if value % notes_per_beat == first_tuplet:
+                new_beat = value // notes_per_beat + 1/3
+            elif value % notes_per_beat == second_tuplet:
+                new_beat = value // notes_per_beat + 2/3
             
             # Not a tuplet
             else:
                 # How many tuplets on the way to the current bar + how many on the current bar
-                decremented_value = value // 10 * 2 + np.floor(value % 10 / 4)
-                new_beat = (value - decremented_value) * vocab_configs['subdivision']
+                decrement = value // notes_per_beat * 2 + np.sum((value % notes_per_beat) > tuplet_indices) # np.floor(value % notes_per_beat / 4)
+                new_beat = (value - decrement) * vocab_configs['subdivision']
             
             # If we are not onsetting and skipping in time, we have a rest!
             if not onset_switch:
