@@ -89,27 +89,25 @@ class Vocabulary:
         #thank god for copilot :^^DD
         
         # Compute tie notes where the offset is greater than the duration
-        df_tie_notes = df_sequence[(df_sequence['type'] == 'offset') & (df_sequence['time'] > duration)]
-        if len(df_tie_notes) == 0: # If there are no tie notes, set it to None
-            df_tie_notes = None
-            
+        df_tie_note_offset_rows = ((df_sequence['type'] == 'offset') & (df_sequence['time'] > duration))
+        df_tie_note_offsets = df_sequence[df_tie_note_offset_rows]
+        
         # Remove these rows from the sequence we want to tokenize
-        df_sequence = df_sequence[~((df_sequence['type'] == 'offset') & (df_sequence['time'] > duration))]
+        df_sequence = df_sequence[~df_tie_note_offset_rows]
+        
+        # If any of the ET notes are being offset now, append them to the df_sequence
+        # Also concat the ET notes that are not being offset now to the df_tie_note_offsets
+        if df_tie_notes is not None:
+            df_tie_notes['time'] -= duration
+            df_sequence = pd.concat([df_sequence, df_tie_notes[df_tie_notes['time'] <= duration]])
+            
+            df_tie_note_offsets = pd.concat([df_tie_note_offsets, df_tie_notes[df_tie_notes['time'] > duration]])
+        
+        if len(df_tie_note_offsets) == 0: # If there are no tie notes, set it to None
+            df_tie_note_offsets = None
         
         # Sort the sequence by time
         df_sequence = df_sequence.sort_values(by='time')
-        
-        # TODO: MAKE THIS FLEXIBLE
-        # Convert times to number of subdivisions
-        # subdivision_tuplet = 1/3
-        
-        # Find number of non-tuplet subdivisions each note are time shifted by
-        # df_sequence['time'] = df_sequence['time'] / subdivision
-        # df_sequence.loc[df_sequence['time'] % subdivision == 0, 'time'] /= subdivision
-        
-        # df_sequence.loc[df_sequence['time'] % subdivision_tuplet == 0, 'time'] /= subdivision_tuplet
-        # tuplet_rows = df_sequence[np.isclose(df_sequence['time'].astype(float) % subdivision_tuplet, 0)]
-        # tuplet_rows = tuplet_rows.drop(subdivision_rows.index, errors='ignore')
         
         # How many tuplets did we pass on the way (not including 1-beat tuplets)
         df_sequence['increment'] = df_sequence['time'] // (1/3) - np.floor(df_sequence['time'])  
@@ -120,7 +118,6 @@ class Vocabulary:
         # exceeded_max = df_sequence['time'] > duration_in_ten_ms
         # df_sequence.loc[exceeded_max, 'time'] = df_sequence.loc[exceeded_max, 'time'] - 1
         
-        last_offset_onset_value = None
         token_sequence = []
         # Add the start of sequence token
         token_sequence.append(self.vocabulary['SOS'][0].translate_value_to_token(0))
@@ -149,33 +146,37 @@ class Vocabulary:
             # Update current time
             cur_beat = beat_value
             
-            # OH GAWD MY EYES ARE BURNING; REFACTOR THIS AT ALL COSTS AAAAaaa
-            if last_offset_onset_value is None:
-                token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(1)) # start with onset
-                last_offset_onset_value = 1
-            
             onset_rows = group.loc[group['type'] == 'onset']
             offset_rows = group.loc[group['type'] == 'offset']
             
             onset_rows = onset_rows.sort_values(by='pitch')
             offset_rows = offset_rows.sort_values(by='pitch')
             
-            if last_offset_onset_value == 1:
-                token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in onset_rows.iterrows())
-                
-                if len(offset_rows) > 0:
-                    token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(0))
-                    last_offset_onset_value = 0
-                    
-                    token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in offset_rows.iterrows())
-            else:
+            # Start with offsetting before onsetting
+            if len(offset_rows) > 0:
+                token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(0))
                 token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in offset_rows.iterrows())
                 
-                if len(onset_rows) > 0:
-                    token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(1))
-                    last_offset_onset_value = 1
+            if len(onset_rows) > 0:
+                token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(1))
+                token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in onset_rows.iterrows())
+            
+            # if last_offset_onset_value == 1:
+            #     token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in onset_rows.iterrows())
+                
+            #     if len(offset_rows) > 0:
+            #         token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(0))
+            #         last_offset_onset_value = 0
                     
-                    token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in onset_rows.iterrows())
+            #         token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in offset_rows.iterrows())
+            # else:
+            #     token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in offset_rows.iterrows())
+                
+            #     if len(onset_rows) > 0:
+            #         token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(1))
+            #         last_offset_onset_value = 1
+                    
+            #         token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in onset_rows.iterrows())
 
         # ---------------------------- Add the end tokens ---------------------------- #
         
@@ -186,8 +187,9 @@ class Vocabulary:
         
         # Add EOS 
         token_sequence.append(self.vocabulary['EOS'][0].translate_value_to_token(0))
-                
-        return token_sequence, df_tie_notes
+        
+        # Return the token sequence and the notes that are offset later in the sequence        
+        return token_sequence, df_tie_note_offsets
                 
                 
     def translate_sequence_token_to_events(self, sequence: list[int]) -> list[tuple[str, int]]:

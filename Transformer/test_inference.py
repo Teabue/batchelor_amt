@@ -104,7 +104,7 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]], bpm: 
         
         # Evenly distribute between treble and bass cleff - could be optimized
         # Depending on the predicted duration of the df, the insert method should act accordingly
-        if (row['onset'] in df.drop(idx)['onset'].values and row['duration'] in df.drop(idx)['duration'].values):
+        if (row['onset'] in df.drop(idx)['onset'].values and row['duration'] in df[df['onset'] == row['onset']].drop(idx)['duration'].values):
             if row['octave'] == '-':
                 treble_staff.insertIntoNoteOrChord(row['onset'], xml_note)
                 bass_staff.insertIntoNoteOrChord(row['onset'], xml_note)
@@ -170,26 +170,42 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
     df = pd.DataFrame(columns=['full_note', 'pitch', 'octave', 'onset', 'offset'])
     
     beat = 0
+    eos_beats = 0
     notes_to_concat = {}
+    et_switch = False
     onset_switch = False
     for event, value in event_sequence:
         if isinstance(value, str):
             value = int(value)
-            
-        if event == "offset_onset" and value == 1:
+        
+        if event == "SOS":
+            et_switch = True
+        
+        if event == "ET":
+            et_switch = False
+        
+        elif event == "EOS":
+            # Keeps track of absolute beat number
+            eos_beats += 4 # TODO: It needs to extract the no of beats of a bar
+        
+        elif event == "offset_onset" and value == 1:
             onset_switch = True
+            et_switch = False
             
         elif event == 'offset_onset' and value == 0:
             onset_switch = False
+            et_switch = False
         
         elif event == "pitch":
             note_value, octave_value = _get_note_value(value)
             note_ = note_value + octave_value
             
-            if onset_switch:
+            # If the et_switch is one, we don't want to save the note or offset it prematurily
+            if not et_switch and onset_switch:
                 # Save the note with the corresponding onset time
                 notes_to_concat[note_] = beat
-            else:
+            
+            elif not et_switch and not onset_switch:
                 if note_ not in notes_to_concat.keys():
                     # This shouldn't happen but I'll allow it and skip it
                     print(f"Note ({note_}) not found in list")
@@ -222,9 +238,9 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
             
             # If we are not onsetting and skipping in time, we have a rest!
             if not onset_switch:
-                df = pd.concat([df, pd.DataFrame([{'full_note': "Rest", 'pitch': "-", 'octave': "-", 'onset': beat, 'offset': new_beat}])], ignore_index=True)
+                df = pd.concat([df, pd.DataFrame([{'full_note': "Rest", 'pitch': "-", 'octave': "-", 'onset': beat, 'offset': new_beat + eos_beats}])], ignore_index=True)
 
-            beat = new_beat
+            beat = new_beat + eos_beats
             
     return df
 
@@ -242,13 +258,13 @@ def _get_note_value(pitch):
 if __name__ == '__main__':
     
     new_song_path = "/Users/helenakeitum/Desktop/midis/pirate_ensemble_105.mp3" # '/zhome/5d/a/168095/batchelor_amt/test_songs/river.mp3'
-    test_new_song = True
-    bpm_tempo = 130 # 65
+    test_new_song = False
+    bpm_tempo = 100 # 65
     
     # ----------------------------- Choose test song ----------------------------- #
-    song_name = 'MIDI-Unprocessed_24_R1_2006_01-05_ORIG_MID--AUDIO_24_R1_2006_01_Track01_wav'
-    data_dir = '/work3/s214629/preprocessed_data_best'
-    test_preprocessing_works = False
+    song_name = "I_Hate_to_Admit_It___-_Bang_Chan_" # 'MIDI-Unprocessed_24_R1_2006_01-05_ORIG_MID--AUDIO_24_R1_2006_01_Track01_wav'
+    data_dir = "preprocessed_data_best" # '/work3/s214629/preprocessed_data_best'
+    test_preprocessing_works = True
     # ------------------------------- Choose model ------------------------------- #
     
     run_path = "" # '/work3/s214629/run_a100_hope3/'
@@ -268,12 +284,12 @@ if __name__ == '__main__':
 
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    saved = True
+    saved = False
     
     if not saved:
         if not test_new_song:
             spectrogram = np.load(os.path.join(data_dir, 'spectrograms', f'{song_name}.npy'))
-            df = pd.read_csv(os.path.join(data_dir, 'test', 'labels.csv'))
+            df = pd.read_csv(os.path.join(data_dir, 'val', 'labels.csv'))
             df = df[df['song_name'] == song_name] # get all segments of the song
 
             sequences = []
@@ -318,11 +334,11 @@ if __name__ == '__main__':
         else:
             raise ValueError('test_new_song and test_preprocessing_works cannot both be True.')
             
-        if not test_new_song:
-            for root, dirs, files in os.walk('/work3/s214629/maestro-v3.0.0/maestro-v3.0.0'):
-                if song_name + '.midi' in files:
-                    bpm_tempo = MidiFile(os.path.join(root, song_name + '.midi')).tracks[0][0].tempo
-                    break
+        # if not test_new_song:
+        #     for root, dirs, files in os.walk('/work3/s214629/maestro-v3.0.0/maestro-v3.0.0'):
+        #         if song_name + '.midi' in files:
+        #             bpm_tempo = MidiFile(os.path.join(root, song_name + '.midi')).tracks[0][0].tempo
+        #             break
     else:
         all_sequence_events = np.load('/Users/helenakeitum/Desktop/saved_seq_events.npy', allow_pickle=True)
     
@@ -334,7 +350,7 @@ if __name__ == '__main__':
                       133, 37+12, 32+12, 175, 
                       132, 26+12*2, 37+12, 32+12, 13+12*3, 
                       2, 0]
-    events = vocab.translate_sequence_token_to_events(token_sequence)
+    # events = vocab.translate_sequence_token_to_events(token_sequence)
     
-    translate_events_to_sheet_music(events, bpm = bpm_tempo)
+    translate_events_to_sheet_music(all_sequence_events, bpm = bpm_tempo)
     # create_midi_from_model_events(all_sequence_events, bpm_tempo, output_dir="/Users/helenakeitum/Desktop", onset_only=False)

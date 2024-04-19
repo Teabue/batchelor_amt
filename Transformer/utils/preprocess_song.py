@@ -196,7 +196,15 @@ class MuseScore(Song):
         super().__init__(song_filename, preprocess_config)
         
         self.sanity_check = sanity_check
-        xml_path = os.path.join(os.path.dirname(self.song_path), self.song_name + '.xml')
+        
+        # Allow for multiple file extensions
+        for song_extension in self.config['gt_file_extensions']:
+            song_path_with_extension = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
+            if os.path.isfile(song_path_with_extension):
+                xml_path = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
+                break
+        else:
+            raise FileNotFoundError(f"No song found with extensions {self.config['gt_file_extensions']} at path {os.path.dirname(self.song_path)}")
         self.score = converter.parse(xml_path)
 
     def compute_onset_offset_beats(self):
@@ -205,13 +213,39 @@ class MuseScore(Song):
         df = pd.DataFrame(columns=['pitch', 'onset', 'offset']) # xml_pitch, onset time and offset time in beats
         
         for element in self.score.flatten().notes: # NOTE: Should it perhaps be notesAndRests
+            # Don't add the note if it is a tie
+            if element.tie is not None and element.tie.type in ["continue", "stop"]:
+                continue
+            
             if isinstance(element, note.Note):
                 midi_value = element.pitch.midi
-                df = pd.concat([df, pd.DataFrame([{'pitch': midi_value, 'onset': element.offset, 'offset': float(element.offset + element.duration.quarterLength)}])], ignore_index=True)
+                duration = element.duration.quarterLength
+                
+                # If the note is tied (bindebue)
+                if element.tie is not None and element.tie.type in ['start', 'continue']:
+                    tied_note = element.next('Note')
+                    while tied_note.pitch != element.pitch and tied_note.tie is not None and tied_note.tie.type != "stop":
+                        tied_note = tied_note.next('Note')
+                    duration += tied_note.duration.quarterLength
+                
+                df = pd.concat([df, pd.DataFrame([{'pitch': midi_value, 'onset': element.offset, 'offset': float(element.offset + duration)}])], ignore_index=True)
+            
             elif isinstance(element, chord.Chord):
                 for p in element.pitches:
                     midi_value = p.midi
-                    df = pd.concat([df, pd.DataFrame([{'pitch': midi_value, 'onset': element.offset, 'offset': float(element.offset + element.duration.quarterLength)}])], ignore_index=True)
+                    duration = element.duration.quarterLength
+                    
+                    # If the note is tied (bindebue)
+                    if element.tie is not None and element.tie.type in ['start', 'continue']:
+                        tied_note = element.next('Chord')
+                        while tied_note.pitches != element.pitches and tied_note.tie is not None and tied_note.tie.type != "stop":
+                            tied_note = tied_note.next('Chord')
+                        duration += tied_note.duration.quarterLength
+                    
+                    df = pd.concat([df, pd.DataFrame([{'pitch': midi_value, 'onset': element.offset, 'offset': float(element.offset + duration)}])], ignore_index=True)
+            
+            # elif isinstance(element, note.Rest):
+            #     df = pd.concat([df, pd.DataFrame([{'pitch': -1, 'onset': element.offset, 'offset': float(element.offset + element.duration.quarterLength)}])], ignore_index=True)
             else:
                 raise ValueError("Element is not a note or chord")
             
@@ -250,29 +284,49 @@ class MuseScore(Song):
         bpms_and_time_sig = self._merge_bpms_and_time_signatures(bpms, time_signature_offsets_and_ratios)
         
         # Convert frame indices to time
-        frame_times = librosa.frames_to_time(range(spectrogram.shape[1]), sr=self.config['sr'], hop_length=self.config['hop_length'])
+        frame_times = librosa.frames_to_time(range(spectrogram.shape[1]), sr=self.config['sr'], hop_length=self.config['hop_length'], n_fft=self.config['n_fft'])
         one_frame_in_seconds = np.diff(frame_times)[0]
         
         # Find sequence length of hyperparam "bars" in seconds according to the bpm and time signature
         indices = []
         sequence_beats = []
-        for start_time, end_time, bpm, quarter_fraction in bpms_and_time_sig:
-            beats_per_bar = quarter_fraction * 4
-            bars_in_seconds = 60 / bpm * beats_per_bar * bars
-            beats_per_second = beats_per_bar / bars_in_seconds
+        
+        # The spectrogram is slightly longer due to overlapping windows
+        # We adjust our computed frames by doing a "time" streching of the theoretical time
+        time_stretching = lambda time: (frame_times[-1] - frame_times[0]) / (bpms_and_time_sig[-1][1][1]) * (time) + frame_times[0]
+        
+        for (start_beat, start_time), (end_beat, end_time), bpm, quarter_fraction in bpms_and_time_sig:
             
-            start_beat = int(start_time * beats_per_second)
-            end_beat = int(end_time * beats_per_second)
+            # Do the time alignment with the spectrogram
+            spec_time_start = time_stretching(start_time)
+            spec_time_end = time_stretching(end_time)
+            
+            # Find the frame indices of the start and end times
+            start_frame = np.searchsorted(frame_times, spec_time_start)
+            end_frame = np.searchsorted(frame_times, spec_time_end)
+            
+            spec_time_duration = spec_time_end - spec_time_start
+            beat_duration = end_beat - start_beat
+            no_of_bars = beat_duration / (quarter_fraction * 4)
+            seconds_per_bar = spec_time_duration / no_of_bars
             
             # Calculate the slice length in frames
-            slice_length = np.rint(bars_in_seconds / one_frame_in_seconds).astype(int)
+            slice_length = int((seconds_per_bar * bars) // one_frame_in_seconds)
+            # Alternative way (should produce the same result): int((end_frame - start_frame) // no_of_bars)
+            
+            beats_per_bar = quarter_fraction * 4
+            # seconds_per_bar = 60 / bpm * beats_per_bar
+            # beats_per_second = beats_per_bar / seconds_per_bar
+            
+            # Calculate the slice length in frames
+            # slice_length = int((seconds_per_bar * bars) // one_frame_in_seconds)
         
             # Make the slicing indices
-            start_frame = int(start_time // one_frame_in_seconds)
-            end_frame = int(end_time // one_frame_in_seconds)
+            # start_frame = int(start_time // one_frame_in_seconds)
+            # end_frame = int(end_time // one_frame_in_seconds)
             indices.extend(np.arange(start_frame, end_frame, slice_length).tolist())
             
-            sequence_beats.extend(np.arange(start_beat, end_beat, int(beats_per_bar * bars)).tolist())
+            sequence_beats.extend(np.arange(start_beat, end_beat + 1, int(beats_per_bar * bars)).tolist())
         
         # ---------------------- Extract the sequences using onset ---------------------- #
         sequence_beats = list(zip(sequence_beats[:-1], sequence_beats[1:]))
@@ -314,6 +368,7 @@ class MuseScore(Song):
         # Initialize indices for the BPMs and time signatures
         bpm_index = ts_index = 0
 
+        start_time, end_time = 0, 0
         # While there are still BPMs and time signatures to process
         while bpm_index < len(bpms) and ts_index < len(time_signature_offsets_and_ratios):
             # Get the current BPM and time signature
@@ -323,18 +378,18 @@ class MuseScore(Song):
             
             # If the BPM and time signature overlap
             if bpm_start < ts_end and ts_start < bpm_end:
-                # The start time in seconds of the overlap is the maximum of the start beats
+                # The start beat is the maximum of the start beats
                 start = max(bpm_start, ts_start)
                 
-                # The end time in seconds of the overlap is the minimum of the end beats
+                # The end beat is the minimum of the end beats
                 end = min(bpm_end, ts_end)
                 
                 # Convert the start and end to time
-                start_time = start * 60 / bpm
-                end_time = end * 60 / bpm
+                start_time = end_time
+                end_time = start_time + (end - start) * 60 / bpm
                 
                 # Add the BPM and time signature to the list
-                merged.append((start_time, end_time, bpm, ts))
+                merged.append(((start, start_time), (end, end_time), bpm, ts))
 
             # If the end beat of the BPM is before the end beat of the time signature, move to the next BPM
             if bpm_end < ts_end:

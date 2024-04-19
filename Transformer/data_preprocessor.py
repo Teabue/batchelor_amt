@@ -43,7 +43,7 @@ class DataPreprocessor:
         # Get song paths from the data directories
         song_paths = []
         for datafolder in self.config['data_dirs']:
-            song_paths.extend([os.path.join(datafolder, file) for file in os.listdir(datafolder) if os.path.splitext(file)[1] == self.config['audio_file_extension']])
+            song_paths.extend([os.path.join(datafolder, file) for file in os.listdir(datafolder) if os.path.splitext(file)[1] in self.config['audio_file_extension']])
         
         # Get train test splits
         train, temp = train_test_split(song_paths, test_size=1-self.config['train'], random_state=self.config['seed'])
@@ -67,8 +67,10 @@ class DataPreprocessor:
             arg[1].append(song)
 
         # # Create a pool of workers
+        # NOTE: Comment this away if debugging
         with multiprocessing.Pool(self.config['num_workers']) as pool:
             pool.starmap(self._prepreprocess_song, args)
+        # self._prepreprocess_song(0, songs)
         
         # ----------------------- Concatenate the worker labels ---------------------- #
         for split in ['train', 'val', 'test']:
