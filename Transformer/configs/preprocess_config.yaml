@@ -1,10 +1,10 @@
-num_workers: 16
+num_workers: 1 # 16
 max_sequence_length: 512
 
 # ---------------------------------- Splits ---------------------------------- #
-train: 0.8
-test: 0.1
-val: 0.1 
+train: 0.25 # 0.8
+test: 0.25 # 0.1
+val: 0.50 # 0.1
 seed: 42
 dataset: MuseScore
 
@@ -18,16 +18,18 @@ n_mels: 128 # number of mel bands to generate
 
 # List of dataset directories
 data_dirs:
-  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2004
-  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2006
-  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2008
-  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2009
-  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2011
-  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2013
-  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2014
-  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2015
-  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2017
-  - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2018
+  - "/Users/helenakeitum/Desktop/test_data"
+  # - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2004
+  # - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2006
+  # - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2008
+  # - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2009
+  # - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2011
+  # - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2013
+  # - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2014
+  # - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2015
+  # - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2017
+  # - /work3/s214629/maestro-v3.0.0/maestro-v3.0.0/2018
 
-audio_file_extension: '.wav'
-output_dir: '/work3/s214629/preprocessed_data_best'  # Preprocessed data will be saved to output_dir/spectrograms/ and output_dir/labels/
+audio_file_extension: ['.wav', '.mp3']
+gt_file_extensions: ['mid', 'xml', 'mxl', 'midi']
+output_dir: 'preprocessed_data_best' # '/work3/s214629/preprocessed_data_best'  # Preprocessed data will be saved to output_dir/spectrograms/ and output_dir/labels/
