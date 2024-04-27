@@ -72,11 +72,11 @@ class Vocabulary:
             sequences (list[DataFrame]): Assumes for now a dataframe with pitch(int), onset(float), offset(float)
         """        
         subdivision = self.config["subdivision"]
+        tuplet_subdivision = 1/3 # TODO: Incorporate 16th tuplet subdivision
         
         # ---------------- In case no notes are played in the sequence --------------- #
         if len(df_sequence) == 0:
-            # duration_in_ten_ms = np.floor(duration * 100)
-            duration_token = np.floor(duration / subdivision) + (duration // (1/3) - np.floor(duration))
+            duration_token = np.floor(duration / subdivision) + (duration // tuplet_subdivision - np.floor(duration))
             token_sequence = []
             token_sequence.append(self.vocabulary['SOS'][0].translate_value_to_token(0))
             token_sequence.append(self.vocabulary['beat'][0].translate_value_to_token(duration_token))
@@ -110,19 +110,15 @@ class Vocabulary:
         df_sequence = df_sequence.sort_values(by='time')
         
         # How many tuplets did we pass on the way (not including 1-beat tuplets)
-        df_sequence['increment'] = df_sequence['time'] // (1/3) - np.floor(df_sequence['time'])  
+        df_sequence['increment'] = df_sequence['time'] // tuplet_subdivision - np.floor(df_sequence['time'])  
         # df_sequence['time'] = np.floor(df_sequence['time'] / subdivision) + df_sequence['increment']
-        
-        # If any of the rounded times exceeded the duration, subtract 1
-        # duration_in_ten_ms = duration * 100
-        # exceeded_max = df_sequence['time'] > duration_in_ten_ms
-        # df_sequence.loc[exceeded_max, 'time'] = df_sequence.loc[exceeded_max, 'time'] - 1
         
         token_sequence = []
         # Add the start of sequence token
         token_sequence.append(self.vocabulary['SOS'][0].translate_value_to_token(0))
 
         # ----------------------------- Declare tie notes ----------------------------- #
+        # NOTE: Should downbeats happen before or after ET tokens
         if df_tie_notes is not None:
             df_tie_notes = df_tie_notes.sort_values(by='pitch')
             
@@ -154,36 +150,27 @@ class Vocabulary:
             
             # Start with offsetting before onsetting
             if len(offset_rows) > 0:
-                token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(0))
-                token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in offset_rows.iterrows())
+                # Don't add tokens if it's just a downbeat and no notes
+                if not (len(offset_rows) == 1 and offset_rows['pitch'].values[0] == -1):
+                    token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(0))
+                    token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in offset_rows.iterrows() if row['pitch'] != -1)
                 
             if len(onset_rows) > 0:
-                token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(1))
-                token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in onset_rows.iterrows())
-            
-            # if last_offset_onset_value == 1:
-            #     token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in onset_rows.iterrows())
+                if -1 in onset_rows['pitch'].values:
+                    token_sequence.append(self.vocabulary['downbeat'][0].translate_value_to_token(1))
+                        
+                # Don't add tokens if it's just a downbeat and no notes
+                if not (len(onset_rows) == 1 and onset_rows['pitch'].values[0] == -1):
+                    token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(1))
+                    token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in onset_rows.iterrows() if row['pitch'] != -1)
                 
-            #     if len(offset_rows) > 0:
-            #         token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(0))
-            #         last_offset_onset_value = 0
-                    
-            #         token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in offset_rows.iterrows())
-            # else:
-            #     token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in offset_rows.iterrows())
-                
-            #     if len(onset_rows) > 0:
-            #         token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(1))
-            #         last_offset_onset_value = 1
-                    
-            #         token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in onset_rows.iterrows())
-
         # ---------------------------- Add the end tokens ---------------------------- #
         
         # Add time shift to end if we haven't reached the end
         # time_shift_to_end = np.floor(duration - cur_beat)
         if cur_beat != duration:
-            token_sequence.append(self.vocabulary['beat'][0].translate_value_to_token(duration))
+            duration_token = np.floor(duration / subdivision) + (duration // tuplet_subdivision - np.floor(duration))
+            token_sequence.append(self.vocabulary['beat'][0].translate_value_to_token(duration_token))
         
         # Add EOS 
         token_sequence.append(self.vocabulary['EOS'][0].translate_value_to_token(0))

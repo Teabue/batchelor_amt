@@ -5,9 +5,10 @@ special_tokens:
   - ET
 
 event_types: 
-  pitch: [0,127]
+  pitch: [-1, 127]
   offset_onset: [0, 1]  # 1 is onset, 0 is offset
   beat: [1, 160] # The chronological order of 32 notes and 8 tuplets for 4 bars
+  downbeat: [1, 1]
 
 subdivision: 0.125 # 32nd note
   

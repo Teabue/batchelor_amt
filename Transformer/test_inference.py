@@ -6,6 +6,7 @@ import yaml
 from tqdm import tqdm
 import json
 
+from fractions import Fraction
 from mido import Message, MetaMessage, MidiFile, MidiTrack, bpm2tempo, second2tick
 from music21 import *
 from torch.nn.utils.rnn import pad_sequence
@@ -78,8 +79,9 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]], bpm: 
     bass_staff.clef = clef.BassClef()
     
     # TODO: Hardcoded. Make it flexible
-    treble_staff.timeSignature = meter.TimeSignature('4/4')
-    bass_staff.timeSignature = meter.TimeSignature('4/4')
+    # TODO: Use the downbeat events to estimate the time signature
+    # treble_staff.timeSignature = meter.TimeSignature('4/4')
+    # bass_staff.timeSignature = meter.TimeSignature('4/4')
     
     # Add the metronome mark to the score
     metronome_mark = tempo.MetronomeMark(number=bpm)
@@ -91,37 +93,52 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]], bpm: 
     
     # Convert time to quarternote length
     df['duration'] = (df['offset'] - df['onset'])
-    
+    last_recorded_downbeat = None
+    beats_per_bar = 0
     for idx, row in df.iterrows():
-        if row['duration'] == 0:
+        
+        if row['full_note'] == "Downbeat":
+            # Update the number of beats in a bar
+            if last_recorded_downbeat is not None:
+                
+                # If a new time signature is detected
+                if beats_per_bar != (row['onset'] - last_recorded_downbeat):
+                    beats_per_bar = row['onset'] - last_recorded_downbeat
+                    
+                    multiplier = 1
+                    while (beats_per_bar * multiplier) % 1 != 0:
+                        multiplier += 1
+                    
+                    nominator = int(beats_per_bar * multiplier)
+                    denominator = 2**(multiplier + 1)
+                
+                    treble_staff.insert(last_recorded_downbeat, meter.TimeSignature(f'{nominator}/{denominator}'))
+                    bass_staff.insert(last_recorded_downbeat, meter.TimeSignature(f'{nominator}/{denominator}'))
+
+            last_recorded_downbeat = row['onset']
+            
             continue
-        if row['full_note'] == 'Rest':
-            xml_note = note.Rest()
-            xml_note.duration = duration.Duration(row['duration'])
-        else:
-            xml_note = note.Note(row['full_note'])
-            xml_note.duration = duration.Duration(row['duration'])
+                
+        xml_note = note.Note(row['full_note'])
+        xml_note.duration = duration.Duration(row['duration'])
+        xml_note.offset = row['onset']
+        
+        if row['duration'] == 0:
+            xml_note = xml_note.getGrace()
         
         # Evenly distribute between treble and bass cleff - could be optimized
         # Depending on the predicted duration of the df, the insert method should act accordingly
-        if (row['onset'] in df.drop(idx)['onset'].values and row['duration'] in df[df['onset'] == row['onset']].drop(idx)['duration'].values):
-            if row['octave'] == '-':
-                treble_staff.insertIntoNoteOrChord(row['onset'], xml_note)
-                bass_staff.insertIntoNoteOrChord(row['onset'], xml_note)
-            elif row['octave'] >= '4':
-                treble_staff.insertIntoNoteOrChord(row['onset'], xml_note)
-            else:
-                bass_staff.insertIntoNoteOrChord(row['onset'], xml_note)
+        staff = treble_staff if xml_note.octave >= 4 else bass_staff
+        ns = list(staff.getElementsByOffset(row['onset'], classList=[note.Note, chord.Chord]))
+        ds = [float(n.duration.quarterLength) for n in ns]
+        if ns and xml_note.duration.quarterLength in ds:
+            notes_to_chordify = np.where(np.isclose(ds, xml_note.duration.quarterLength))[0]
+            [staff.remove(ns[n]) for n in notes_to_chordify]
+            chord_to_insert = chord.Chord(list(ns[n] for n in notes_to_chordify) + [xml_note])
+            
+            staff.insert(xml_note.offset, chord_to_insert)
         else:
-            if row['octave'] == '-':
-                # Let MuseScore handle the rests
-                continue
-                treble_staff.insert(row['onset'], xml_note)
-                bass_staff.insert(row['onset'], xml_note)
-            elif row['octave'] >= '4':
-                treble_staff.insert(row['onset'], xml_note)
-            else:
-                bass_staff.insert(row['onset'], xml_note)
+            staff.insert(xml_note.offset, xml_note)
         
     # Connect the streams to a score
     score = stream.Score()        
@@ -131,6 +148,10 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]], bpm: 
     score.insert(0, bass_staff)
     piano = layout.StaffGroup([treble_staff, bass_staff], symbol='brace')
     score.insert(0, piano)
+    
+    # Fill in rests where there is empty space
+    for part in score.parts:
+        part.makeRests(fillGaps=True, inPlace=True)
 
     # Change pitches to the analyzed key 
     # NOTE: If the song changes key throughout, it may screw-up the key analysis
@@ -171,22 +192,31 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
     
     beat = 0
     eos_beats = 0
-    notes_to_concat = {}
+    last_downbeat_onset = 0
+    notes_to_concat: dict[str, list[int]] = {}
+    possible_grace_notes = {}
     et_switch = False
     onset_switch = False
-    for event, value in event_sequence:
+    for idx, (event, value) in enumerate(event_sequence):
         if isinstance(value, str):
             value = int(value)
         
         if event == "SOS":
             et_switch = True
         
-        if event == "ET":
+        elif event == 'downbeat':
+            # Update eos_beats to be the difference between the current beat and the last downbeat's beat
+            eos_beats += beat - last_downbeat_onset
+            last_downbeat_onset = beat
+            df = pd.concat([df, pd.DataFrame([{'full_note': "Downbeat", 'pitch': "-", 'octave': "-", 'onset': last_downbeat_onset, 'offset': last_downbeat_onset}])], ignore_index=True)
+        
+        elif event == "ET":
             et_switch = False
         
         elif event == "EOS":
+            pass
             # Keeps track of absolute beat number
-            eos_beats += 4 # TODO: It needs to extract the no of beats of a bar
+            # eos_beats += beats_per_bar # TODO: It needs to extract the no of beats of a bar
         
         elif event == "offset_onset" and value == 1:
             onset_switch = True
@@ -202,20 +232,38 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
             
             # If the et_switch is one, we don't want to save the note or offset it prematurily
             if not et_switch and onset_switch:
-                # Save the note with the corresponding onset time
-                notes_to_concat[note_] = beat
+                if note_ in notes_to_concat.keys():
+                    print(f"Note ({note_}) is set to onset again before offset!")
+                    notes_to_concat[note_].append(beat)
+                elif note_ in possible_grace_notes.keys():
+                    # Save the note with the corresponding onset time
+                    df = pd.concat([df, pd.DataFrame([{'full_note': note_, 'pitch': value, 'octave': octave_value, 'onset': possible_grace_notes.pop(note_), 'offset': beat}])], ignore_index=True)
+                else:
+                    # Save the note with the corresponding onset time
+                    notes_to_concat[note_] = [beat]
             
             elif not et_switch and not onset_switch:
                 if note_ not in notes_to_concat.keys():
                     # This shouldn't happen but I'll allow it and skip it
-                    print(f"Note ({note_}) not found in list")
+                    print(f"Note ({note_}) not found in list. Could it be a grace note?")
+                    possible_grace_notes[note_] = beat
                     continue
                 
-                # Remove from the dict and add to the dataframe
-                df_onset = notes_to_concat.pop(note_)
+                if len(notes_to_concat[note_]) > 1:
+                    print(f"Note ({note_}) has more than one onset! " +
+                          f"Taking the last one and offsetting it to {beat}")
+                    
+                    df_onset = notes_to_concat[note_].pop(-1)
+                else:
+                    # Remove from the dict and add to the dataframe
+                    df_onset = notes_to_concat.pop(note_)[0]
+                
                 df = pd.concat([df, pd.DataFrame([{'full_note': note_, 'pitch': note_value, 'octave': octave_value, 'onset': df_onset, 'offset': beat}])], ignore_index=True)
         
         elif event == "beat":
+            # We have shifted a beat so the saved grace notes are no longer relevant
+            possible_grace_notes = {}
+            
             notes_per_beat = (1 / vocab_configs['subdivision'] + 2) # +2 because there are always 2 eight note tuplets
             
             # Find indices of the eight tuplets
@@ -237,8 +285,8 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
                 new_beat = (value - decrement) * vocab_configs['subdivision']
             
             # If we are not onsetting and skipping in time, we have a rest!
-            if not onset_switch:
-                df = pd.concat([df, pd.DataFrame([{'full_note': "Rest", 'pitch': "-", 'octave': "-", 'onset': beat, 'offset': new_beat + eos_beats}])], ignore_index=True)
+            # if not onset_switch:
+            #     df = pd.concat([df, pd.DataFrame([{'full_note': "Rest", 'pitch': "-", 'octave': "-", 'onset': beat, 'offset': new_beat + eos_beats}])], ignore_index=True)
 
             beat = new_beat + eos_beats
             
@@ -262,7 +310,7 @@ if __name__ == '__main__':
     bpm_tempo = 100 # 65
     
     # ----------------------------- Choose test song ----------------------------- #
-    song_name = "I_Hate_to_Admit_It___-_Bang_Chan_" # 'MIDI-Unprocessed_24_R1_2006_01-05_ORIG_MID--AUDIO_24_R1_2006_01_Track01_wav'
+    song_name = "Something__The_Beatles" # 'MIDI-Unprocessed_24_R1_2006_01-05_ORIG_MID--AUDIO_24_R1_2006_01_Track01_wav'
     data_dir = "preprocessed_data_best" # '/work3/s214629/preprocessed_data_best'
     test_preprocessing_works = True
     # ------------------------------- Choose model ------------------------------- #
@@ -289,7 +337,13 @@ if __name__ == '__main__':
     if not saved:
         if not test_new_song:
             spectrogram = np.load(os.path.join(data_dir, 'spectrograms', f'{song_name}.npy'))
-            df = pd.read_csv(os.path.join(data_dir, 'val', 'labels.csv'))
+            
+            for i in ['train', 'val', 'test']:              
+                df = pd.read_csv(os.path.join(data_dir, i, 'labels.csv'))
+                
+                if (df['song_name'] == song_name).any():
+                    break
+                
             df = df[df['song_name'] == song_name] # get all segments of the song
 
             sequences = []
@@ -352,5 +406,5 @@ if __name__ == '__main__':
                       2, 0]
     # events = vocab.translate_sequence_token_to_events(token_sequence)
     
-    translate_events_to_sheet_music(all_sequence_events, bpm = bpm_tempo)
+    translate_events_to_sheet_music(all_sequence_events, bpm = bpm_tempo, output_dir=f"{song_name}")
     # create_midi_from_model_events(all_sequence_events, bpm_tempo, output_dir="/Users/helenakeitum/Desktop", onset_only=False)

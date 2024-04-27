@@ -10,6 +10,7 @@ inference/processed_audio/
 .DS_Store
 /models
 /.vscode
+/preprocessed_data_best
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

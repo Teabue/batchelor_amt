@@ -6,6 +6,7 @@ import mido
 import yaml
 import torch
 
+from fractions import Fraction
 from music21 import *
 from utils.vocabularies import Vocabulary
 from torch.nn.utils.rnn import pad_sequence
@@ -206,52 +207,69 @@ class MuseScore(Song):
         else:
             raise FileNotFoundError(f"No song found with extensions {self.config['gt_file_extensions']} at path {os.path.dirname(self.song_path)}")
         self.score = converter.parse(xml_path)
+        try:
+            self.score = self.score.expandRepeats()
+        except Exception:
+            print(f"----------------------Could not expand repeats for {self.song_name} due to notation mistakes. We will continue without expansion----------------------")
+            
 
     def compute_onset_offset_beats(self):
         
         # Load the MusicXML file
         df = pd.DataFrame(columns=['pitch', 'onset', 'offset']) # xml_pitch, onset time and offset time in beats
         
-        for element in self.score.flatten().notes: # NOTE: Should it perhaps be notesAndRests
-            # Don't add the note if it is a tie
-            if element.tie is not None and element.tie.type in ["continue", "stop"]:
-                continue
-            
-            if isinstance(element, note.Note):
-                midi_value = element.pitch.midi
-                duration = element.duration.quarterLength
+        # ---------------------- Add downbeats ---------------------- #
+        for measure in self.score.parts[0].getElementsByClass(stream.Measure):
+            downbeat = measure.offset
+            df = pd.concat([df, pd.DataFrame([{'pitch': -1, 'onset': downbeat, 'offset': downbeat}])], ignore_index=True)
+        
+        for element in self.score.flatten().notes:
+            # ---------------------- Add notes and chords ---------------------- #  
+            duration = np.array([Fraction(element.quarterLength)] * len(element.pitches))
+            ele_notes = np.array([(pi.pitch.midi, pi.tie) for pi in (element.notes if element.isChord else [element])])
+
+            # ---------------------- Handle ties ---------------------- #
+            if element.tie is not None and element.tie.type == 'start':      
+                next_note = element.next('Note')
+                next_note_offset = next_note.offset if next_note is not None else np.inf
+                next_chord = element.next('Chord')
+                next_chord_offset = next_chord.offset if next_chord is not None else np.inf
                 
-                # If the note is tied (bindebue)
-                if element.tie is not None and element.tie.type in ['start', 'continue']:
-                    tied_note = element.next('Note')
-                    while tied_note.pitch != element.pitch and tied_note.tie is not None and tied_note.tie.type != "stop":
-                        tied_note = tied_note.next('Note')
-                    duration += tied_note.duration.quarterLength
+                tied_note = next_note if next_note_offset < next_chord_offset else next_chord
+                midi_and_ties = np.array([(pi.pitch.midi, pi.tie) for pi in (tied_note.notes if tied_note.isChord else [tied_note])])
                 
-                df = pd.concat([df, pd.DataFrame([{'pitch': midi_value, 'onset': element.offset, 'offset': float(element.offset + duration)}])], ignore_index=True)
-            
-            elif isinstance(element, chord.Chord):
-                for p in element.pitches:
-                    midi_value = p.midi
-                    duration = element.duration.quarterLength
+                overlapping_pitches = np.any([[m1 == m2 and (t2 is not None and t2.type == "stop") for (m1, t1) in ele_notes] for (m2, t2) in midi_and_ties], axis = 0)
+                while not np.any(overlapping_pitches):
+                    if isinstance(tied_note, note.Note):
+                        next_note = tied_note.next('Note')
+                        next_note_offset = next_note.offset if next_note is not None else np.inf
+                    else:
+                        next_chord = tied_note.next('Chord')
+                        next_chord_offset = next_chord.offset if next_chord is not None else np.inf
+                
+                    tied_note = next_note if next_note_offset < next_chord_offset else next_chord                        
+                    midi_and_ties = np.array([(pi.pitch.midi, pi.tie) for pi in (tied_note.notes if tied_note.isChord else [tied_note])])
                     
-                    # If the note is tied (bindebue)
-                    if element.tie is not None and element.tie.type in ['start', 'continue']:
-                        tied_note = element.next('Chord')
-                        while tied_note.pitches != element.pitches and tied_note.tie is not None and tied_note.tie.type != "stop":
-                            tied_note = tied_note.next('Chord')
-                        duration += tied_note.duration.quarterLength
+                    overlapping_pitches = np.any([[m1 == m2 and (t2 is not None and t2.type == "stop") for (m1, t1) in ele_notes] for (m2, t2) in midi_and_ties], axis = 0)
                     
-                    df = pd.concat([df, pd.DataFrame([{'pitch': midi_value, 'onset': element.offset, 'offset': float(element.offset + duration)}])], ignore_index=True)
+                    if np.any(overlapping_pitches) and (tied_note.tie is not None and tied_note.tie.type == "continue"):
+                        duration[overlapping_pitches] = duration[overlapping_pitches] + Fraction(tied_note.quarterLength)
+                duration[overlapping_pitches] = duration[overlapping_pitches] + Fraction(tied_note.quarterLength) # NOTE: Could this be mess things up somehow?
             
-            # elif isinstance(element, note.Rest):
-            #     df = pd.concat([df, pd.DataFrame([{'pitch': -1, 'onset': element.offset, 'offset': float(element.offset + element.duration.quarterLength)}])], ignore_index=True)
-            else:
-                raise ValueError("Element is not a note or chord")
-            
+            for i, p in enumerate(element.pitches):
+                # Don't add the note if it is a tie
+                if ele_notes[i, 1] is not None and ele_notes[i, 1].type in ['continue', 'stop']:
+                    continue
+                midi_value = p.midi
+                df = pd.concat([df, pd.DataFrame([{'pitch': midi_value, 'onset': Fraction(element.offset), 'offset': Fraction(element.offset) + duration[i]}])], ignore_index=True)
+        
+        df = df.sort_values(by=['onset', 'pitch'])
+        
         return df
     
     def compute_labels_and_segments(self, df, spectrogram, bars = 1):
+        # TODO: Incorporate the bars hyperparam
+        
         # Extract tempo(s) from the score
         mm_marks = self.score.metronomeMarkBoundaries()
         
@@ -285,48 +303,37 @@ class MuseScore(Song):
         
         # Convert frame indices to time
         frame_times = librosa.frames_to_time(range(spectrogram.shape[1]), sr=self.config['sr'], hop_length=self.config['hop_length'], n_fft=self.config['n_fft'])
-        one_frame_in_seconds = np.diff(frame_times)[0]
         
         # Find sequence length of hyperparam "bars" in seconds according to the bpm and time signature
-        indices = []
-        sequence_beats = []
-        
-        # The spectrogram is slightly longer due to overlapping windows
-        # We adjust our computed frames by doing a "time" streching of the theoretical time
-        time_stretching = lambda time: (frame_times[-1] - frame_times[0]) / (bpms_and_time_sig[-1][1][1]) * (time) + frame_times[0]
-        
+        indices = [0]
+        compare_ind = [0]
+        sequence_beats = [0]
         for (start_beat, start_time), (end_beat, end_time), bpm, quarter_fraction in bpms_and_time_sig:
-            
-            # Do the time alignment with the spectrogram
-            spec_time_start = time_stretching(start_time)
-            spec_time_end = time_stretching(end_time)
-            
-            # Find the frame indices of the start and end times
-            start_frame = np.searchsorted(frame_times, spec_time_start)
-            end_frame = np.searchsorted(frame_times, spec_time_end)
-            
-            spec_time_duration = spec_time_end - spec_time_start
+        
+            spec_time_duration = end_time - start_time
             beat_duration = end_beat - start_beat
-            no_of_bars = beat_duration / (quarter_fraction * 4)
+            beats_per_bar = quarter_fraction * 4
+            no_of_bars = beat_duration / beats_per_bar
             seconds_per_bar = spec_time_duration / no_of_bars
             
-            # Calculate the slice length in frames
-            slice_length = int((seconds_per_bar * bars) // one_frame_in_seconds)
-            # Alternative way (should produce the same result): int((end_frame - start_frame) // no_of_bars)
+            # NOTE: Former looks more correct when inspecting, but intuitively, the latter seems more correct
+            frames = [np.searchsorted(frame_times, start_time + seconds_per_bar * n) for n in range(1, int(no_of_bars) + 1)]
+            indices.extend(frames)
             
-            beats_per_bar = quarter_fraction * 4
-            # seconds_per_bar = 60 / bpm * beats_per_bar
-            # beats_per_second = beats_per_bar / seconds_per_bar
+            comp = [np.abs(frame_times - (start_time + seconds_per_bar * n)).argmin() for n in range(1, int(no_of_bars) + 1)]
+            compare_ind.extend(comp)
             
-            # Calculate the slice length in frames
-            # slice_length = int((seconds_per_bar * bars) // one_frame_in_seconds)
-        
             # Make the slicing indices
-            # start_frame = int(start_time // one_frame_in_seconds)
-            # end_frame = int(end_time // one_frame_in_seconds)
-            indices.extend(np.arange(start_frame, end_frame, slice_length).tolist())
-            
-            sequence_beats.extend(np.arange(start_beat, end_beat + 1, int(beats_per_bar * bars)).tolist())
+            beats = [start_beat+beats_per_bar * n for n in range(1, int(no_of_bars) + 1)]
+            sequence_beats.extend(beats)
+        
+        # Plot the spectrogram along with the beats and cuts
+        # import matplotlib.pyplot as plt
+        # plt.figure(figsize=(10, 5))
+        # plt.imshow(spectrogram, aspect='auto', origin='lower')
+        # for idx in indices:
+        #     plt.axvline(idx, color='r', linewidth=1)
+        # plt.show()
         
         # ---------------------- Extract the sequences using onset ---------------------- #
         sequence_beats = list(zip(sequence_beats[:-1], sequence_beats[1:]))
@@ -336,11 +343,10 @@ class MuseScore(Song):
             sequence_label = df[(df['onset'] >= start_beat) & (df['onset'] < end_beat)]
             
             # IMPORTANT: Shift the sequence times
-            sequence_label.onset -= start_beat
-            sequence_label.offset -= start_beat
+            sequence_label.onset = sequence_label.onset - Fraction(start_beat)
+            sequence_label.offset = sequence_label.offset - Fraction(start_beat)
             
             sequence_labels.append(sequence_label)
-        
             
         # ---------------------------- Translate to tokens --------------------------- #
         with open("Transformer/configs/vocab_config.yaml", 'r') as f:
