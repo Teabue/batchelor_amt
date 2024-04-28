@@ -210,7 +210,7 @@ class MuseScore(Song):
         try:
             self.score = self.score.expandRepeats()
         except Exception:
-            print(f"----------------------Could not expand repeats for {self.song_name} due to notation mistakes. We will continue without expansion----------------------")
+            raise Exception(f"----------------------Could not expand repeats for {self.song_name} due to notation mistakes. We will continue without expansion----------------------")
             
 
     def compute_onset_offset_beats(self):
