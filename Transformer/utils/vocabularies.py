@@ -8,6 +8,8 @@ The use that event.translate_from_token(token) to get the event value.
 import pandas as pd
 import numpy as np
 
+from fractions import Fraction
+
 # TODO: Add time shift to the vocabulary in a way that makes sense :^)
 # TODO: Loading tuples from a yaml file is irritating >:(
 # TODO: I'm 100% sure all of this could be optimized with at least 200% :^)
@@ -72,7 +74,7 @@ class Vocabulary:
             sequences (list[DataFrame]): Assumes for now a dataframe with pitch(int), onset(float), offset(float)
         """        
         subdivision = self.config["subdivision"]
-        tuplet_subdivision = 1/3 # TODO: Incorporate 16th tuplet subdivision
+        tuplet_subdivision = Fraction(self.config["tuplet_subdivision"])
         
         # ---------------- In case no notes are played in the sequence --------------- #
         if len(df_sequence) == 0:
@@ -110,7 +112,8 @@ class Vocabulary:
         df_sequence = df_sequence.sort_values(by='time')
         
         # How many tuplets did we pass on the way (not including 1-beat tuplets)
-        df_sequence['increment'] = df_sequence['time'] // tuplet_subdivision - np.floor(df_sequence['time'])  
+        sub_tup_common_beats = len(np.intersect1d(np.arange(0, 1, subdivision), np.arange(0, 1, tuplet_subdivision)))
+        df_sequence['increment'] = df_sequence['time'] // tuplet_subdivision - np.floor(df_sequence['time'] / (1/sub_tup_common_beats))  
         # df_sequence['time'] = np.floor(df_sequence['time'] / subdivision) + df_sequence['increment']
         
         token_sequence = []
@@ -118,7 +121,7 @@ class Vocabulary:
         token_sequence.append(self.vocabulary['SOS'][0].translate_value_to_token(0))
 
         # ----------------------------- Declare tie notes ----------------------------- #
-        # NOTE: Should downbeats happen before or after ET tokens
+        # NOTE: ET tokens happen before downbeats
         if df_tie_notes is not None:
             df_tie_notes = df_tie_notes.sort_values(by='pitch')
             
@@ -157,7 +160,7 @@ class Vocabulary:
                 
             if len(onset_rows) > 0:
                 if -1 in onset_rows['pitch'].values:
-                    token_sequence.append(self.vocabulary['downbeat'][0].translate_value_to_token(1))
+                    token_sequence.append(self.vocabulary['downbeat'][0].translate_value_to_token(0))
                         
                 # Don't add tokens if it's just a downbeat and no notes
                 if not (len(onset_rows) == 1 and onset_rows['pitch'].values[0] == -1):

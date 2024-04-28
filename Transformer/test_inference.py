@@ -61,7 +61,8 @@ def create_midi_from_model_events(events, bpm_tempo, output_dir='', onset_only=F
 
     mid.save(os.path.join(output_dir,'river_pred.midi'))
     
-def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]], bpm: int,
+def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]],
+                                    bpm: int,
                                     output_dir = "/Users/helenakeitum/Desktop/output.xml"):
     """example: [('timeshift', 200), ('onset', 0), ('pitch', 60), ('offset', 100), ('pitch', 62), ('onset', 100)]
 
@@ -264,30 +265,26 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
             # We have shifted a beat so the saved grace notes are no longer relevant
             possible_grace_notes = {}
             
-            notes_per_beat = (1 / vocab_configs['subdivision'] + 2) # +2 because there are always 2 eight note tuplets
-            
-            # Find indices of the eight tuplets
+            # Find indices of the tuplets
             sub_beats = np.arange(0, 1, vocab_configs['subdivision'])
-            first_tuplet = np.argwhere(sub_beats > 1/3)[0][0]
-            second_tuplet = np.argwhere(sub_beats > 2/3)[0][0] + 1 # + 1 because we have already found the first tuplet
-            tuplet_indices = np.array([first_tuplet, second_tuplet])
+            tup_beats = np.arange(0, 1, Fraction(vocab_configs['tuplet_subdivision']))
+            common = np.intersect1d(sub_beats, tup_beats)
+            tup_beats = np.setdiff1d(tup_beats, common)
+            tuplet_indices = (np.searchsorted(sub_beats, tup_beats) + np.arange(0, len(tup_beats))).tolist() # We add the range to account for the fact that we are adding tuplets
+            
+            notes_per_beat = len(sub_beats) + len(tup_beats)
+            
             
             # Convert the time shift to quarternote fractions
-            if value % notes_per_beat == first_tuplet:
-                new_beat = value // notes_per_beat + 1/3
-            elif value % notes_per_beat == second_tuplet:
-                new_beat = value // notes_per_beat + 2/3
+            if value % notes_per_beat in tuplet_indices:
+                new_beat = value // notes_per_beat + tup_beats[tuplet_indices.index(value % notes_per_beat)]
             
             # Not a tuplet
             else:
                 # How many tuplets on the way to the current bar + how many on the current bar
-                decrement = value // notes_per_beat * 2 + np.sum((value % notes_per_beat) > tuplet_indices) # np.floor(value % notes_per_beat / 4)
+                decrement = value // notes_per_beat * len(tup_beats) + np.sum((value % notes_per_beat) > np.asarray(tuplet_indices)) 
                 new_beat = (value - decrement) * vocab_configs['subdivision']
             
-            # If we are not onsetting and skipping in time, we have a rest!
-            # if not onset_switch:
-            #     df = pd.concat([df, pd.DataFrame([{'full_note': "Rest", 'pitch': "-", 'octave': "-", 'onset': beat, 'offset': new_beat + eos_beats}])], ignore_index=True)
-
             beat = new_beat + eos_beats
             
     return df
@@ -310,7 +307,7 @@ if __name__ == '__main__':
     bpm_tempo = 100 # 65
     
     # ----------------------------- Choose test song ----------------------------- #
-    song_name = "Something__The_Beatles" # 'MIDI-Unprocessed_24_R1_2006_01-05_ORIG_MID--AUDIO_24_R1_2006_01_Track01_wav'
+    song_name = "16tuplet" # 'MIDI-Unprocessed_24_R1_2006_01-05_ORIG_MID--AUDIO_24_R1_2006_01_Track01_wav'
     data_dir = "preprocessed_data_best" # '/work3/s214629/preprocessed_data_best'
     test_preprocessing_works = True
     # ------------------------------- Choose model ------------------------------- #

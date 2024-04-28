@@ -3,12 +3,13 @@ special_tokens:
   - SOS
   - EOS
   - ET
+  - downbeat
 
 event_types: 
   pitch: [-1, 127]
   offset_onset: [0, 1]  # 1 is onset, 0 is offset
-  beat: [1, 160] # The chronological order of 32 notes and 8 tuplets for 4 bars
-  downbeat: [1, 1]
+  beat: [1, 192] # The chronological order of 32 notes and 16 tuplets for 4 bars
 
 subdivision: 0.125 # 32nd note
+tuplet_subdivision: 1/6 # 16th note triplet
   
