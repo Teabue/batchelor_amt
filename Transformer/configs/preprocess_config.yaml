@@ -10,6 +10,7 @@ dataset: MuseScore
 
 # ---------------------------- Spectrogram configs --------------------------- #
 preprocess_method: 'logmel' # 'logmel' or 'cqt'
+h_bars: 3 # hyperparameter: number of bars to slice the audio into
 sr: 22050 # sample rate
 n_fft: 2048 # number of samples used for each fourier transform
 hop_length: 512 # hop_length. The number of samples between successive frames is n_fft - hope_length

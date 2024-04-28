@@ -26,7 +26,7 @@ class DataPreprocessor:
             else:
                 raise ValueError("Invalid dataset")
             
-            df_song = song.preprocess()
+            df_song = song.preprocess(h_bars = self.config['h_bars'])
             
             save_path = os.path.join(self.config['output_dir'], split, f'worker_{worker_nr}.csv')
             if not os.path.exists(save_path):

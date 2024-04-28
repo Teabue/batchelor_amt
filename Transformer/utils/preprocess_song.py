@@ -308,6 +308,7 @@ class MuseScore(Song):
         indices = [0]
         compare_ind = [0]
         sequence_beats = [0]
+        remainder = 0
         for (start_beat, start_time), (end_beat, end_time), bpm, quarter_fraction in bpms_and_time_sig:
         
             spec_time_duration = end_time - start_time
@@ -317,15 +318,18 @@ class MuseScore(Song):
             seconds_per_bar = spec_time_duration / no_of_bars
             
             # NOTE: Former looks more correct when inspecting, but intuitively, the latter seems more correct
-            frames = [np.searchsorted(frame_times, start_time + seconds_per_bar * n) for n in range(1, int(no_of_bars) + 1)]
+            frames = [np.min([np.searchsorted(frame_times, start_time + seconds_per_bar * n), spectrogram.shape[1] - 1]) for n in range(bars - remainder, int(no_of_bars) + 1, bars)]
             indices.extend(frames)
             
-            comp = [np.abs(frame_times - (start_time + seconds_per_bar * n)).argmin() for n in range(1, int(no_of_bars) + 1)]
+            comp = [np.abs(frame_times - (start_time + seconds_per_bar * n)).argmin() for n in range(bars - remainder, int(no_of_bars) + 1, bars)]
             compare_ind.extend(comp)
             
             # Make the slicing indices
-            beats = [start_beat+beats_per_bar * n for n in range(1, int(no_of_bars) + 1)]
+            beats = [start_beat+beats_per_bar * n for n in range(bars - remainder, int(no_of_bars) + 1, bars)]
             sequence_beats.extend(beats)
+            
+            remainder = int(no_of_bars - (bars - remainder)) % bars 
+                
         
         # Plot the spectrogram along with the beats and cuts
         # import matplotlib.pyplot as plt
@@ -405,8 +409,8 @@ class MuseScore(Song):
 
         return merged
             
-    def preprocess(self) -> None:
+    def preprocess(self, h_bars) -> None:
         spectrogram = self.compute_spectrogram()
         df_onset_offset = self.compute_onset_offset_beats()
-        df_labels = self.compute_labels_and_segments(df_onset_offset, spectrogram)
+        df_labels = self.compute_labels_and_segments(df_onset_offset, spectrogram, bars = h_bars)
         return df_labels
