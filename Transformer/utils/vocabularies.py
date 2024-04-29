@@ -77,6 +77,7 @@ class Vocabulary:
         tuplet_subdivision = Fraction(self.config["tuplet_subdivision"])
         
         # ---------------- In case no notes are played in the sequence --------------- #
+        # NOTE: Should downbeats be present here?
         if len(df_sequence) == 0:
             duration_token = np.floor(duration / subdivision) + (duration // tuplet_subdivision - np.floor(duration))
             token_sequence = []
@@ -89,7 +90,6 @@ class Vocabulary:
         # Unravel the dataframe to have columns (pitch, type, time) where type is either onset or offset
         df_sequence['duration'] = df_sequence['offset'] - df_sequence['onset']
         df_sequence = df_sequence.melt(id_vars=['pitch', 'duration'], value_vars=['onset', 'offset'], var_name='type', value_name='time')
-        #thank god for copilot :^^DD
         
         # Compute tie notes where the offset is greater than the duration
         df_tie_note_offset_rows = ((df_sequence['type'] == 'offset') & (df_sequence['time'] > duration))
@@ -106,7 +106,8 @@ class Vocabulary:
             
             df_tie_note_offsets = pd.concat([df_tie_note_offsets, df_tie_notes[df_tie_notes['time'] > duration]])
         
-        if len(df_tie_note_offsets) == 0: # If there are no tie notes, set it to None
+        # If there are no tie notes, set it to None
+        if len(df_tie_note_offsets) == 0: 
             df_tie_note_offsets = None
         
         # Sort the sequence by time
@@ -132,8 +133,8 @@ class Vocabulary:
             token_sequence.append(self.vocabulary['ET'][0].translate_value_to_token(0))
         
         # ------------------------ Get the rest of the labels ------------------------ #    
-           
-        cur_beat = 0
+        
+        cur_beat = 0 # NOTE: If we want beat 0 to be a token, remove this variable entirely since we always shift beats
         # First group by beats
         for beat_value, group in df_sequence.groupby('time'):
             # Number of subdivisions plus the off-beat tuplets we passed on the way
@@ -156,7 +157,7 @@ class Vocabulary:
             
             # Start with offsetting before onsetting
             if len(offset_rows) > 0:
-                # Don't add tokens if it's just a downbeat and no notes
+                # Don't add offset tokens for downbeat or grace notes (yet)
                 if np.any(offset_rows['duration'].values != 0):
                     token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(0))
                     token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in offset_rows.iterrows() if not (row['pitch'] == -1 or row['pitch'] in possible_grace_notes['pitch'].values))
@@ -165,12 +166,12 @@ class Vocabulary:
                 if -1 in onset_rows['pitch'].values:
                     token_sequence.append(self.vocabulary['downbeat'][0].translate_value_to_token(0))
                         
-                # Don't add tokens if it's just a downbeat and no notes
+                # Don't add onset tokens if it's just a downbeat and no notes
                 if not (len(onset_rows) == 1 and onset_rows['pitch'].values[0] == -1):
                     token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(1))
                     token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in onset_rows.iterrows() if row['pitch'] != -1)
 
-                # Add grace notes 
+                # Now add grace notes offsets (to preserve onset/offset convention)
                 if not possible_grace_notes.empty:
                     token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(0))
                     token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in possible_grace_notes.iterrows())

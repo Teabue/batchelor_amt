@@ -210,7 +210,7 @@ class MuseScore(Song):
         try:
             self.score = self.score.expandRepeats()
         except Exception:
-            raise Exception(f"----------------------Could not expand repeats for {self.song_name} due to notation mistakes. We will continue without expansion----------------------")
+            raise Exception(f"----------------------Could not expand repeats for {self.song_name} due to notation mistakes. Remove it from the dataset >:(----------------------")
             
 
     def compute_onset_offset_beats(self):
@@ -223,8 +223,8 @@ class MuseScore(Song):
             downbeat = measure.offset
             df = pd.concat([df, pd.DataFrame([{'pitch': -1, 'onset': downbeat, 'offset': downbeat}])], ignore_index=True)
         
+        # ---------------------- Add notes and chords ---------------------- #  
         for element in self.score.flatten().notes:
-            # ---------------------- Add notes and chords ---------------------- #  
             duration = np.array([Fraction(element.quarterLength)] * len(element.pitches))
             ele_notes = np.array([(pi.pitch.midi, pi.tie) for pi in (element.notes if element.isChord else [element])])
 
@@ -238,11 +238,15 @@ class MuseScore(Song):
                 tied_note = next_note if next_note_offset < next_chord_offset else next_chord
                 midi_and_ties = np.array([(pi.pitch.midi, pi.tie) for pi in (tied_note.notes if tied_note.isChord else [tied_note])])
                 
+                # Check if any of the note(s) in the next element matches any pitches with the start tied element 
+                # as well as if the next element contains a stop tie. This will determine when we terminate
                 overlapping_pitches = np.any([[m1 == m2 and (t2 is not None and t2.type == "stop") for (m1, t1) in ele_notes] for (m2, t2) in midi_and_ties], axis = 0)
+                
+                # Keep going forward in the score until we encounter a stop tie with the same pitch as the start tied element
                 while not np.any(overlapping_pitches):
-                    if isinstance(tied_note, note.Note):
+                    if tied_note.isNote:
                         next_note = tied_note.next('Note')
-                        next_note_offset = next_note.offset if next_note is not None else np.inf
+                        next_note_offset = next_note.offset if next_note is not None else np.inf # We reached the end of the score
                     else:
                         next_chord = tied_note.next('Chord')
                         next_chord_offset = next_chord.offset if next_chord is not None else np.inf
@@ -252,6 +256,7 @@ class MuseScore(Song):
                     
                     overlapping_pitches = np.any([[m1 == m2 and (t2 is not None and t2.type == "stop") for (m1, t1) in ele_notes] for (m2, t2) in midi_and_ties], axis = 0)
                     
+                    # If it is a continuing tie, we need to update the duration of the pitches that are tied
                     if np.any(overlapping_pitches) and (tied_note.tie is not None and tied_note.tie.type == "continue"):
                         duration[overlapping_pitches] = duration[overlapping_pitches] + Fraction(tied_note.quarterLength)
                 duration[overlapping_pitches] = duration[overlapping_pitches] + Fraction(tied_note.quarterLength) # NOTE: Could this be mess things up somehow?
@@ -315,6 +320,7 @@ class MuseScore(Song):
             no_of_bars = beat_duration / beats_per_bar
             seconds_per_bar = spec_time_duration / no_of_bars
             
+            # Find the frames that are closest to the start of each bar(s)
             # NOTE: Former looks more correct when inspecting, but intuitively, the latter seems more correct
             frames = [np.min([np.searchsorted(frame_times, start_time + seconds_per_bar * n), spectrogram.shape[1] - 1]) for n in range(bars - remainder, int(no_of_bars) + 1, bars)]
             indices.extend(frames)
@@ -323,13 +329,14 @@ class MuseScore(Song):
             compare_ind.extend(comp)
             
             # Make the slicing indices
-            beats = [start_beat+beats_per_bar * n for n in range(bars - remainder, int(no_of_bars) + 1, bars)]
+            beats = [start_beat + beats_per_bar * n for n in range(bars - remainder, int(no_of_bars) + 1, bars)]
             sequence_beats.extend(beats)
             
+            # If the slice hyperparameter creates a remainder, we need to adjust the next slice
             remainder = int(no_of_bars - (bars - remainder)) % bars 
                 
         
-        # Plot the spectrogram along with the beats and cuts
+        # # Plot the spectrogram along with the beats and cuts
         # import matplotlib.pyplot as plt
         # plt.figure(figsize=(10, 5))
         # plt.imshow(spectrogram, aspect='auto', origin='lower')
@@ -374,32 +381,28 @@ class MuseScore(Song):
         merged = []
 
         # Initialize indices for the BPMs and time signatures
-        bpm_index = ts_index = 0
+        bpm_index, ts_index = 0, 0
 
         start_time, end_time = 0, 0
-        # While there are still BPMs and time signatures to process
+        # While there are still bpms and time signatures to process
         while bpm_index < len(bpms) and ts_index < len(time_signature_offsets_and_ratios):
-            # Get the current BPM and time signature
+
             bpm_start, bpm_end, bpm = bpms[bpm_index]
-            
             ts_start, ts_end, ts = time_signature_offsets_and_ratios[ts_index]
             
-            # If the BPM and time signature overlap
+            # If the bpm and time signature overlap
             if bpm_start < ts_end and ts_start < bpm_end:
-                # The start beat is the maximum of the start beats
+
                 start = max(bpm_start, ts_start)
-                
-                # The end beat is the minimum of the end beats
                 end = min(bpm_end, ts_end)
                 
                 # Convert the start and end to time
                 start_time = end_time
                 end_time = start_time + (end - start) * 60 / bpm
                 
-                # Add the BPM and time signature to the list
                 merged.append(((start, start_time), (end, end_time), bpm, ts))
 
-            # If the end beat of the BPM is before the end beat of the time signature, move to the next BPM
+            # If the end beat of the bpm is before the end beat of the time signature, move to the next BPM
             if bpm_end < ts_end:
                 bpm_index += 1
             else:
