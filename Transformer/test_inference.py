@@ -206,18 +206,14 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
             et_switch = True
         
         elif event == 'downbeat':
-            # Update eos_beats to be the difference between the current beat and the last downbeat's beat
-            eos_beats += beat - last_downbeat_onset
             last_downbeat_onset = beat
             df = pd.concat([df, pd.DataFrame([{'full_note': "Downbeat", 'pitch': "-", 'octave': "-", 'onset': last_downbeat_onset, 'offset': last_downbeat_onset}])], ignore_index=True)
         
         elif event == "ET":
             et_switch = False
         
-        elif event == "EOS":
-            pass
-            # Keeps track of absolute beat number
-            # eos_beats += beats_per_bar # TODO: It needs to extract the no of beats of a bar
+        elif event == "EOS":# Keeps track of absolute beat number
+            eos_beats = beat
         
         elif event == "offset_onset" and value == 1:
             onset_switch = True
@@ -274,7 +270,6 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
             
             notes_per_beat = len(sub_beats) + len(tup_beats)
             
-            
             # Convert the time shift to quarternote fractions
             if value % notes_per_beat in tuplet_indices:
                 new_beat = value // notes_per_beat + tup_beats[tuplet_indices.index(value % notes_per_beat)]
@@ -307,7 +302,7 @@ if __name__ == '__main__':
     bpm_tempo = 100 # 65
     
     # ----------------------------- Choose test song ----------------------------- #
-    song_name = "16tuplet" # 'MIDI-Unprocessed_24_R1_2006_01-05_ORIG_MID--AUDIO_24_R1_2006_01_Track01_wav'
+    song_name = "Something__The_Beatles" # 'MIDI-Unprocessed_24_R1_2006_01-05_ORIG_MID--AUDIO_24_R1_2006_01_Track01_wav'
     data_dir = "preprocessed_data_best" # '/work3/s214629/preprocessed_data_best'
     test_preprocessing_works = True
     # ------------------------------- Choose model ------------------------------- #

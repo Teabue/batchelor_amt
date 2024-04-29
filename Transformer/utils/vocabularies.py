@@ -87,7 +87,8 @@ class Vocabulary:
         
         # ------------------------------ Setup dataframe ----------------------------- #
         # Unravel the dataframe to have columns (pitch, type, time) where type is either onset or offset
-        df_sequence = df_sequence.melt(id_vars='pitch', value_vars=['onset', 'offset'], var_name='type', value_name='time')
+        df_sequence['duration'] = df_sequence['offset'] - df_sequence['onset']
+        df_sequence = df_sequence.melt(id_vars=['pitch', 'duration'], value_vars=['onset', 'offset'], var_name='type', value_name='time')
         #thank god for copilot :^^DD
         
         # Compute tie notes where the offset is greater than the duration
@@ -151,12 +152,14 @@ class Vocabulary:
             onset_rows = onset_rows.sort_values(by='pitch')
             offset_rows = offset_rows.sort_values(by='pitch')
             
+            possible_grace_notes = onset_rows[(onset_rows['pitch'] != -1) & (onset_rows['duration'] == 0)]
+            
             # Start with offsetting before onsetting
             if len(offset_rows) > 0:
                 # Don't add tokens if it's just a downbeat and no notes
-                if not (len(offset_rows) == 1 and offset_rows['pitch'].values[0] == -1):
+                if np.any(offset_rows['duration'].values != 0):
                     token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(0))
-                    token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in offset_rows.iterrows() if row['pitch'] != -1)
+                    token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in offset_rows.iterrows() if not (row['pitch'] == -1 or row['pitch'] in possible_grace_notes['pitch'].values))
                 
             if len(onset_rows) > 0:
                 if -1 in onset_rows['pitch'].values:
@@ -166,7 +169,13 @@ class Vocabulary:
                 if not (len(onset_rows) == 1 and onset_rows['pitch'].values[0] == -1):
                     token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(1))
                     token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in onset_rows.iterrows() if row['pitch'] != -1)
-                
+
+                # Add grace notes 
+                if not possible_grace_notes.empty:
+                    token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(0))
+                    token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in possible_grace_notes.iterrows())
+            
+            
         # ---------------------------- Add the end tokens ---------------------------- #
         
         # Add time shift to end if we haven't reached the end

@@ -268,8 +268,6 @@ class MuseScore(Song):
         return df
     
     def compute_labels_and_segments(self, df, spectrogram, bars = 1):
-        # TODO: Incorporate the bars hyperparam
-        
         # Extract tempo(s) from the score
         mm_marks = self.score.metronomeMarkBoundaries()
         
