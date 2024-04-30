@@ -1,6 +1,3 @@
-num_workers: 1 # 16
-max_sequence_length: 512
-
 # ---------------------------------- Splits ---------------------------------- #
 train: 0.25 # 0.8
 test: 0.25 # 0.1
@@ -9,6 +6,7 @@ seed: 42
 dataset: MuseScore
 
 # ---------------------------- Spectrogram configs --------------------------- #
+max_sequence_length: 512
 preprocess_method: 'logmel' # 'logmel' or 'cqt'
 h_bars: 3 # hyperparameter: number of bars to slice the audio into
 sr: 22050 # sample rate
@@ -16,7 +14,7 @@ n_fft: 2048 # number of samples used for each fourier transform
 hop_length: 512 # hop_length. The number of samples between successive frames is n_fft - hope_length
 n_mels: 128 # number of mel bands to generate
 
-
+# -------------------------------- Directories ------------------------------- #
 # List of dataset directories
 data_dirs:
   - "/Users/helenakeitum/Desktop/test_data"
@@ -34,3 +32,6 @@ data_dirs:
 audio_file_extension: ['.wav', '.mp3']
 gt_file_extensions: ['mid', 'xml', 'mxl', 'midi']
 output_dir: 'preprocessed_data_best' # '/work3/s214629/preprocessed_data_best'  # Preprocessed data will be saved to output_dir/spectrograms/ and output_dir/labels/
+
+# ------------------------------ Miscellaneous ------------------------------ #
+num_workers: 1 # 16

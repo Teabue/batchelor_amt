@@ -1,13 +1,22 @@
-
-# VOCABULARY
+# Vocabulary 
 
 ## Configuration
 The [vocabulary config file](/Transformer/configs/vocab_config.yaml) defines all the event types we want and their min and max values.
 
-Note: Time shift is a bit special, it's easier to work with seconds and more flexible, so the min max values will automatically be determined through:
-- STEPS_PER_SECOND defaults to 100, which means that each time shift will shift 10 ms
-- MAX_SHIFT_SECONDS defaults to 10 
+|                    | **Name**            | **Explanation**                                                                                                                                                                                                                                 |
+|--------------------|---------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Special tokens** | PAD                 | To ensure the same length of spectrogram slices in the dataloader, spectrograms are padded to match the size of the greatest slice in the batch. The padding token informs of this padding                                                      |
+|                    | SOS                 | Start-of-sequence token                                                                                                                                                                                                                         |
+|                    | EOS                 | End-of-sequence token                                                                                                                                                                                                                           |
+|                    | ET                  | It can happen that note onsets will be cut off in the slicing process. These notes should therefore not be marked with an onset in the beginning of the sequence but instead be labelled as a note that is a continuation of a previous segment |
+|                    | downbeat            | Marks whenever the first beat of a bar is present                                                                                                                                                                                               |
+| **Event types**    | pitch               | Tokens corresponding to the midi pitch numbering system. Note that -1 is a helper token designed to mark downbeats and does not constitute a pitch                                                                                              |
+|                    | onset\_offset       | A switch-like token where 1 corresponds to the onsetting of subsequent notes and 0 corresponds to offsetting                                                                                                                                    |
+|                    | beat                | The chronological order of notes for a specified subdivision of notes and tuplets for four bars. Currently uses 32nd notes and 16th tuplets                                                                                                     |
+| **Miscellaneous**  | subdivision         | The fraction of a quarter note corresponding to the shortest subdivision of the notes. Currently 32nd notes                                                                                                                                     |
+|                    | tuplet\_subdivision | Expresses the fraction of a quarternote corresponding to the minimum subdivision of tuplets. Note that it is given as a string but is converted to a Fraction class object in the code to avoid floating points and rounding errors             |
 
+<mark> NOTE: </mark> beat 0 is currently not implemented, marking the first beat of a segment. This is because it's implied that we always start at a relative beat of 0. The beat tokens should therefore be interpreted as the chronological distance of notes from beat 0. This could be changed later
 
 ## Tokenization 
 
@@ -38,17 +47,6 @@ Gives:
 ```
 Where for example a token integer of value 4 means Pitch(3)
 
-### Current Event Types:
-_Event types with (min,max) values:_
-- Time_shift  - shifts the time forward
-- Pitch - Pitch of sound
-- Onset_offset - whether the subsequent pitches will be onset or offset (0: Offset, 1: Onset)
-
-_Special characters with single values:_
-- EOS - end of sequence
-- ET - end tie; used to indicate it's the end of the declaration of already active pitches.
-
-
 ### Future Event Types:
 _Event types with (min,max) values:_
 - Instrument
@@ -58,57 +56,84 @@ _Special characters:_
 
 
 ## Rules:
-- When doing pitches, always order them by pitch value from lowest first to highest last
-- If there are both onsets and offsets for one time shift, then always keep whatever mode was on, then change the mode
-- Always declare already playing pitches first then use ET token
-    - Do the normal time shifting and append the pitch tokens. (ignore all tokens in the sequence until this part has been handled) and the normal token-timeshifting will assume it starts from 0 after ET has been done.
-        - we could just add a note_offset thing to make stuff easier to parse in inference
-- Time shift comes BEFORE onsets and offset tokens
-- A sequence will be time shifted to its end duration if there are no notes that are played.
 
+The hierarchy of tokens is given as:
+1. SOS
+2. pitches of ET notes (if any)
+3. ET (if any)
+4. beat
+5. downbeat
+6. offset
+7. onset
+8. pitch
+9. EOS
+10. PAD
+
+Do note that if pitches are being offset, those pitch tokens will be appended to the sequence before a possible onset token. The hierarchy is simply to express that the onset\_offset switch will be declared before any pitches.
+
+- When doing pitches, always order them by pitch value from lowest first to highest last (the helper downbeat pitch -1 will be removed from the ordering)
+- If there are both onsets and offsets for one time shift, we always offset before we onset
+- Always declare already playing pitches first followed by an ET token
+- A sequence will be beat shifted to its end duration if there are no notes that are played or if the notes do not play the entire sequence duration
 
 
 ## EXAMPLE:
 
 ### Input Segment
 ```
-Pitch	onset	offset
-20	--	3.5s   (onset from previous segment)
-19	--	1s	(onset from previous segment)	
-12	3s	4s
-15	3s	3.5s
-28	4s	4.5s
+pitch	onset	offset
+20	    --	    1   (onset from previous segment)
+19	    --	    2 	(onset from previous segment)	
+-1      0       0
+-1      1       1
+12	    1 	    5/2
+-1      2       2
+-1      3       3
+28	    10/3    31/8
+15	    15/4    31/8
 ```
 
 ###  Tokenized:
 ```
-Pitch(19)
-Pitch(20)
+SOS
+pitch(19)
+pitch(20)
 ET()
 
-Time_shift(100) 	- t: 1s
-Onset_offset(0)		- offset 
-Pitch(19)
+downbeat          - beat 1
+beat(12) 	      - beat 2
+downbeat
+onset_offset(0)   - offset 
+pitch(20)
+onset_offset(1)	  - onset
+pitch(12)
 
-Time_shift(200)		- t: 3s
-Onset_offset(1)		- onset
-Pitch(12)
-Pitch(15)
+beat(24)		  - beat 3
+downbeat
+onset_offset(0)   - offset
+pitch(19)
 
-Time_shift(50)		- t: 3.5s
-Onset_offset(0)		- offset
-Pitch(15)
-Pitch(20)
+beat(30)		  - beat 3.5 
+onset_offset(0)   - offset
+pitch(12)
 
-Time_shift(50)		- t: 4s
-Pitch(12)
-Onset_offset(0)		- onset
-Pitch(28)
+beat(36)
+downbeat
 
-Time_shift(50)		- t: 4.5s
-Onset_offset(0)
-Pitch(28)
+beat(40)		  - beat 4 1/3
+onset_offset(1)   - onset
+pitch(28)
+
+beat(45)          - beat 4 3/4
+onset_offset(1)   - onset
+pitch(15)
+
+beat(47)          - beat 4 7/8
+onset_offset(0)   - offset
+pitch(15)
+pitch(28)
+
+beat(48)          - shift to end of sequence beat
 
 EOS()
 ```
-

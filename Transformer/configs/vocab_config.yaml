@@ -6,10 +6,10 @@ special_tokens:
   - downbeat
 
 event_types: 
-  pitch: [-1, 127]
+  pitch: [-1, 127] # Note that the -1 token is a helper token to mark downbeats and does not represent a pitch in of itself
   offset_onset: [0, 1]  # 1 is onset, 0 is offset
   beat: [1, 192] # The chronological order of 32 notes and 16 tuplets for 4 bars
 
 subdivision: 0.125 # 32nd note
-tuplet_subdivision: 1/6 # 16th note triplet
+tuplet_subdivision: 1/6 # 16th note triplet - Is wrapped in a Fraction class in the code
   
