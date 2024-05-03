@@ -206,7 +206,7 @@ class MuseScore(Song):
                 self.score = converter.parse(score_path)
                 break
         else:
-            raise FileNotFoundError(f"No score found with extensions {self.config['score_file_extensions']} at path {os.path.dirname(self.song_name)}")
+            raise FileNotFoundError(f"No score found with extensions {self.config['score_file_extensions']} for song {self.song_name}")
         
         # for song_extension in self.config['midi_file_extensions']:
         #     song_path_with_extension = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
@@ -215,14 +215,16 @@ class MuseScore(Song):
         #         self.midi = mido.MidiFile(midi_path)
         #         break
         # else:
-        #     raise FileNotFoundError(f"No midi found with extensions {self.config['midi_file_extensions']} at path {os.path.dirname(self.song_name)}")
-        
-        
+        #     raise FileNotFoundError(f"No midi found with extensions {self.config['midi_file_extensions']} for song {self.song_name}")
         
         try:
             self.score = self.score.expandRepeats()
+            self.expansion_succes = True
+            self.pickup_measure = False
+            self.compensation_measure = False
         except Exception:
-            raise Exception(f"----------------------Could not expand repeats for {self.song_name} due to notation mistakes. Remove it from the dataset >:(----------------------")
+            print(f"----------------------Could not expand repeats for {self.song_name} due to notation mistakes. It will be removed from the dataset >:(----------------------")
+            self.expansion_succes = False
             
 
     def compute_onset_offset_beats(self):
@@ -234,8 +236,13 @@ class MuseScore(Song):
         for measure in self.score.parts[0].getElementsByClass(stream.Measure):
             # Check if it's a pickup measure (anacrusis)
             if measure.paddingLeft != 0:
-                downbeat = measure.offset
-                df = pd.concat([df, pd.DataFrame([{'pitch': -1, 'onset': downbeat, 'offset': downbeat}])], ignore_index=True)
+                self.pickup_measure = True
+                continue
+            if measure.paddingRight != 0:
+                self.compensation_measure = True
+                
+            downbeat = measure.offset
+            df = pd.concat([df, pd.DataFrame([{'pitch': -1, 'onset': downbeat, 'offset': downbeat}])], ignore_index=True)
         
         # ---------------------- Add notes and chords ---------------------- #  
         for element in self.score.flatten().notes:
@@ -293,28 +300,42 @@ class MuseScore(Song):
         # times = [(msg.time, msg.numerator / msg.denominator) for msg in self.midi.tracks[0] if msg.type == "time_signature"]
         
         # Make a list of list with the start and end indices of the bpm changes
-        bpms = []
+        bpms_offsets, bpms = [], []
         for i, (bpm_start, bpm_end, bpm) in enumerate(mm_marks):
-            if bpm_start == bpm_end:
-                continue
-            
-            bpms.append([bpm_start, bpm_end, bpm.getQuarterBPM()])
+            if not bpms:
+                bpms.append(bpm.getQuarterBPM())
+                bpms_offsets.append(bpm_start)
+            else:
+                # During expansion, it can occur that the same bpm gets added again
+                if bpms[-1] != bpm.getQuarterBPM():
+                    bpms.append(bpm.getQuarterBPM())    
+                    
+                    # Manual time signature inserts should be omitted to avoid duplicates
+                    if bpm_start not in bpms_offsets:
+                        bpms_offsets.append(bpm_start)
+        bpms_offsets.append(bpm_end)
+        
+        bpms = list(zip(bpms_offsets[:-1], bpms_offsets[1:], bpms))
         bpms = np.asarray(bpms)
         
         # Do the same with the time signatures
         time_signatures = self.score.getTimeSignatures()
-        time_signature_offsets_and_ratios = []
+        t_offsets, t_ratios = [], []
         for i, ts in enumerate(time_signatures):
-            start_beat = ts.offset
-            
-            if i < len(time_signatures) - 1:
-                if start_beat == time_signatures[i + 1].offset:
-                    continue
-                end_beat = time_signatures[i + 1].offset
+            if not t_ratios:
+                t_ratios.append(ts.numerator / ts.denominator)
+                t_offsets.append(ts.offset)
             else:
-                end_beat = self.score.duration.quarterLength   
-            
-            time_signature_offsets_and_ratios.append([start_beat, end_beat, ts.numerator / ts.denominator])
+                # During expansion, it can occur that the same time signature gets added again
+                if t_ratios[-1] != ts.numerator / ts.denominator:
+                    t_ratios.append(ts.numerator / ts.denominator)    
+                    
+                    # Manual time signature inserts should be omitted to avoid duplicates
+                    if ts.offset not in t_offsets:
+                        t_offsets.append(ts.offset)
+        t_offsets.append(self.score.quarterLength)
+        
+        time_signature_offsets_and_ratios = list(zip(t_offsets[:-1], t_offsets[1:], t_ratios))
         time_signature_offsets_and_ratios = np.asarray(time_signature_offsets_and_ratios)
     
         # Merge the bpms and time signatures to get a temporal overview
@@ -329,7 +350,17 @@ class MuseScore(Song):
         sequence_beats = [0]
         remainder = 0
         for (start_beat, start_time), (end_beat, end_time), bpm, quarter_fraction in bpms_and_time_sig:
-        
+            
+            # Adjust starting times and beats if the song has incomplete measures
+            if start_time == 0 and self.pickup_measure:
+                # The first slice will include the pickup measure
+                start_beat = df[df['pitch'] == -1].iloc[0]['onset']
+                start_time = start_beat * 60 / bpm
+            if end_beat == self.score.quarterLength and self.compensation_measure:
+                # The last slicings will omit the compensation measure
+                end_beat = df[df['pitch'] == -1].iloc[-1]['onset']
+                end_time = start_time + (end_beat - start_beat) * 60 / bpm
+            
             spec_time_duration = end_time - start_time
             beat_duration = end_beat - start_beat
             beats_per_bar = quarter_fraction * 4

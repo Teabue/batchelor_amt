@@ -26,6 +26,10 @@ class DataPreprocessor:
             else:
                 raise ValueError("Invalid dataset")
             
+            # Due to notation mistakes, expansions couldn't be resolved and the song will be omitted
+            if song.expansion_succes is False:
+                continue
+            
             df_song = song.preprocess(h_bars = self.config['h_bars'])
             
             save_path = os.path.join(self.config['output_dir'], split, f'worker_{worker_nr}.csv')
