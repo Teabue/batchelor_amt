@@ -203,20 +203,21 @@ class MuseScore(Song):
             song_path_with_extension = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
             if os.path.isfile(song_path_with_extension):
                 score_path = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
+                self.score = converter.parse(score_path)
                 break
         else:
             raise FileNotFoundError(f"No score found with extensions {self.config['score_file_extensions']} at path {os.path.dirname(self.song_name)}")
         
-        for song_extension in self.config['midi_file_extensions']:
-            song_path_with_extension = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
-            if os.path.isfile(song_path_with_extension):
-                midi_path = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
-                break
-        else:
-            raise FileNotFoundError(f"No midi found with extensions {self.config['midi_file_extensions']} at path {os.path.dirname(self.song_name)}")
+        # for song_extension in self.config['midi_file_extensions']:
+        #     song_path_with_extension = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
+        #     if os.path.isfile(song_path_with_extension):
+        #         midi_path = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
+        #         self.midi = mido.MidiFile(midi_path)
+        #         break
+        # else:
+        #     raise FileNotFoundError(f"No midi found with extensions {self.config['midi_file_extensions']} at path {os.path.dirname(self.song_name)}")
         
-        self.score = converter.parse(score_path)
-        self.midi = mido.MidiFile(midi_path)
+        
         
         try:
             self.score = self.score.expandRepeats()
@@ -231,8 +232,10 @@ class MuseScore(Song):
         
         # ---------------------- Add downbeats ---------------------- #
         for measure in self.score.parts[0].getElementsByClass(stream.Measure):
-            downbeat = measure.offset
-            df = pd.concat([df, pd.DataFrame([{'pitch': -1, 'onset': downbeat, 'offset': downbeat}])], ignore_index=True)
+            # Check if it's a pickup measure (anacrusis)
+            if measure.paddingLeft != 0:
+                downbeat = measure.offset
+                df = pd.concat([df, pd.DataFrame([{'pitch': -1, 'onset': downbeat, 'offset': downbeat}])], ignore_index=True)
         
         # ---------------------- Add notes and chords ---------------------- #  
         for element in self.score.flatten().notes:
@@ -286,8 +289,8 @@ class MuseScore(Song):
     def compute_labels_and_segments(self, df, spectrogram, bars = 1):
         # Extract tempo(s) from the score
         mm_marks = self.score.metronomeMarkBoundaries()
-        tempos = [(msg.time, mido.tempo2bpm(msg.tempo)) for msg in self.midi.tracks[0] if msg.type == "set_tempo"]
-        times = [(msg.time, msg.numerator / msg.denominator) for msg in self.midi.tracks[0] if msg.type == "time_signature"]
+        # tempos = [(msg.time, mido.tempo2bpm(msg.tempo)) for msg in self.midi.tracks[0] if msg.type == "set_tempo"]
+        # times = [(msg.time, msg.numerator / msg.denominator) for msg in self.midi.tracks[0] if msg.type == "time_signature"]
         
         # Make a list of list with the start and end indices of the bpm changes
         bpms = []
