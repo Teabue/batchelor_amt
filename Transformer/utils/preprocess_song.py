@@ -199,14 +199,25 @@ class MuseScore(Song):
         self.sanity_check = sanity_check
         
         # Allow for multiple file extensions
-        for song_extension in self.config['gt_file_extensions']:
+        for song_extension in self.config['score_file_extensions']:
             song_path_with_extension = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
             if os.path.isfile(song_path_with_extension):
-                xml_path = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
+                score_path = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
                 break
         else:
-            raise FileNotFoundError(f"No song found with extensions {self.config['gt_file_extensions']} at path {os.path.dirname(self.song_path)}")
-        self.score = converter.parse(xml_path)
+            raise FileNotFoundError(f"No score found with extensions {self.config['score_file_extensions']} at path {os.path.dirname(self.song_name)}")
+        
+        for song_extension in self.config['midi_file_extensions']:
+            song_path_with_extension = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
+            if os.path.isfile(song_path_with_extension):
+                midi_path = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
+                break
+        else:
+            raise FileNotFoundError(f"No midi found with extensions {self.config['midi_file_extensions']} at path {os.path.dirname(self.song_name)}")
+        
+        self.score = converter.parse(score_path)
+        self.midi = mido.MidiFile(midi_path)
+        
         try:
             self.score = self.score.expandRepeats()
         except Exception:
@@ -244,7 +255,7 @@ class MuseScore(Song):
                 
                 # Keep going forward in the score until we encounter a stop tie with the same pitch as the start tied element
                 while not np.any(overlapping_pitches):
-                    if tied_note.isNote:
+                    if isinstance(tied_note, note.Note):
                         next_note = tied_note.next('Note')
                         next_note_offset = next_note.offset if next_note is not None else np.inf # We reached the end of the score
                     else:
@@ -252,7 +263,7 @@ class MuseScore(Song):
                         next_chord_offset = next_chord.offset if next_chord is not None else np.inf
                 
                     tied_note = next_note if next_note_offset < next_chord_offset else next_chord                        
-                    midi_and_ties = np.array([(pi.pitch.midi, pi.tie) for pi in (tied_note.notes if tied_note.isChord else [tied_note])])
+                    midi_and_ties = np.array([(pi.pitch.midi, pi.tie) for pi in (tied_note.notes if isinstance(tied_note, chord.Chord) else [tied_note])])
                     
                     overlapping_pitches = np.any([[m1 == m2 and (t2 is not None and t2.type == "stop") for (m1, t1) in ele_notes] for (m2, t2) in midi_and_ties], axis = 0)
                     
@@ -275,6 +286,8 @@ class MuseScore(Song):
     def compute_labels_and_segments(self, df, spectrogram, bars = 1):
         # Extract tempo(s) from the score
         mm_marks = self.score.metronomeMarkBoundaries()
+        tempos = [(msg.time, mido.tempo2bpm(msg.tempo)) for msg in self.midi.tracks[0] if msg.type == "set_tempo"]
+        times = [(msg.time, msg.numerator / msg.denominator) for msg in self.midi.tracks[0] if msg.type == "time_signature"]
         
         # Make a list of list with the start and end indices of the bpm changes
         bpms = []
