@@ -72,9 +72,9 @@ class DataPreprocessor:
 
         # # Create a pool of workers
         # NOTE: Comment this away if debugging
-        # with multiprocessing.Pool(self.config['num_workers']) as pool:
-        #     pool.starmap(self._prepreprocess_song, args)
-        self._prepreprocess_song(0, songs)
+        with multiprocessing.Pool(self.config['num_workers']) as pool:
+            pool.starmap(self._prepreprocess_song, args)
+        # self._prepreprocess_song(0, songs)
         
         # ----------------------- Concatenate the worker labels ---------------------- #
         for split in ['train', 'val', 'test']:
