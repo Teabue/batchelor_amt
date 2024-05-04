@@ -140,7 +140,8 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]],
             staff.insert(xml_note.offset, chord_to_insert)
         else:
             staff.insert(xml_note.offset, xml_note)
-        
+    
+    print("Done with adding to the streams. Now we make the score!") 
     # Connect the streams to a score
     score = stream.Score()        
 
@@ -150,14 +151,17 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]],
     piano = layout.StaffGroup([treble_staff, bass_staff], symbol='brace')
     score.insert(0, piano)
     
+    print("We have a score! We fill in rests")
     # Fill in rests where there is empty space
     for part in score.parts:
         part.makeRests(fillGaps=True, inPlace=True)
 
+    print("We propose a key")
     # Change pitches to the analyzed key 
     # NOTE: If the song changes key throughout, it may screw-up the key analysis
     proposed_key = score.analyze('key')
     
+    print("We update the pitches if the key has flats")
     # Only update the pitches if the key signature includes flats
     if proposed_key.sharps < 0:
         score = _update_pitches(score, proposed_key)
@@ -172,7 +176,8 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]],
     # treble_staff.makeAccidentals(inPlace = True)
     # bass_staff.makeAccidentals(inPlace = True)
 
-    score.show()
+    print("We can show the score and write it to a file")
+    # score.show()
     score.write('musicxml', fp=output_dir)
 
 
@@ -302,7 +307,7 @@ if __name__ == '__main__':
     bpm_tempo = 100 # 65
     
     # ----------------------------- Choose test song ----------------------------- #
-    song_name = "Something__The_Beatles" # 'MIDI-Unprocessed_24_R1_2006_01-05_ORIG_MID--AUDIO_24_R1_2006_01_Track01_wav'
+    song_name = "Confronting_Myself_Celeste_Piano_Collections_-_Lena_RaineTrevor_Alan_Gomes" # 'MIDI-Unprocessed_24_R1_2006_01-05_ORIG_MID--AUDIO_24_R1_2006_01_Track01_wav'
     data_dir = "preprocessed_data_best" # '/work3/s214629/preprocessed_data_best'
     test_preprocessing_works = True
     # ------------------------------- Choose model ------------------------------- #

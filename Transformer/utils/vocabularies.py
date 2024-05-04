@@ -79,7 +79,7 @@ class Vocabulary:
         # ---------------- In case no notes are played in the sequence --------------- #
         # NOTE: Should downbeats be present here?
         if len(df_sequence) == 0:
-            duration_token = np.floor(duration / subdivision) + (duration // tuplet_subdivision - np.floor(duration))
+            duration_token = np.floor(duration / subdivision) + (duration // tuplet_subdivision - np.floor(duration / (1/sub_tup_common_beats)))
             token_sequence = []
             token_sequence.append(self.vocabulary['SOS'][0].translate_value_to_token(0))
             token_sequence.append(self.vocabulary['beat'][0].translate_value_to_token(duration_token))
@@ -182,7 +182,7 @@ class Vocabulary:
         # Add time shift to end if we haven't reached the end
         # time_shift_to_end = np.floor(duration - cur_beat)
         if cur_beat != duration:
-            duration_token = np.floor(duration / subdivision) + (duration // tuplet_subdivision - np.floor(duration))
+            duration_token = np.floor(duration / subdivision) + (duration // tuplet_subdivision - np.floor(duration / (1/sub_tup_common_beats)))
             token_sequence.append(self.vocabulary['beat'][0].translate_value_to_token(duration_token))
         
         # Add EOS 

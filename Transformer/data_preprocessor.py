@@ -30,7 +30,7 @@ class DataPreprocessor:
             if song.expansion_succes is False:
                 continue
             
-            df_song = song.preprocess(h_bars = self.config['h_bars'])
+            df_song = song.preprocess(bars = self.config['h_bars'], verbose = False)
             
             save_path = os.path.join(self.config['output_dir'], split, f'worker_{worker_nr}.csv')
             if not os.path.exists(save_path):
@@ -72,9 +72,9 @@ class DataPreprocessor:
 
         # # Create a pool of workers
         # NOTE: Comment this away if debugging
-        with multiprocessing.Pool(self.config['num_workers']) as pool:
-            pool.starmap(self._prepreprocess_song, args)
-        # self._prepreprocess_song(0, songs)
+        # with multiprocessing.Pool(self.config['num_workers']) as pool:
+        #     pool.starmap(self._prepreprocess_song, args)
+        self._prepreprocess_song(0, songs)
         
         # ----------------------- Concatenate the worker labels ---------------------- #
         for split in ['train', 'val', 'test']:
