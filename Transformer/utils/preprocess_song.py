@@ -293,7 +293,7 @@ class MuseScore(Song):
         
         return df
     
-    def compute_labels_and_segments(self, df, spectrogram, bars = 1):
+    def compute_labels_and_segments(self, df, spectrogram, bars = 1, verbose = False):
         # Extract tempo(s) from the score
         mm_marks = self.score.metronomeMarkBoundaries()
         # tempos = [(msg.time, mido.tempo2bpm(msg.tempo)) for msg in self.midi.tracks[0] if msg.type == "set_tempo"]
@@ -367,29 +367,35 @@ class MuseScore(Song):
             no_of_bars = beat_duration / beats_per_bar
             seconds_per_bar = spec_time_duration / no_of_bars
             
+            if np.isclose(remainder, np.round(remainder)):
+                remainder = np.round(remainder)
+            
             # Find the frames that are closest to the start of each bar(s)
             # NOTE: Former looks more correct when inspecting, but intuitively, the latter seems more correct
-            frames = [np.min([np.searchsorted(frame_times, start_time + seconds_per_bar * n), spectrogram.shape[1] - 1]) for n in range(bars - remainder, int(no_of_bars) + 1, bars)]
+            frames = [np.min([np.searchsorted(frame_times, start_time + seconds_per_bar * n), spectrogram.shape[1] - 1]) for n in range(bars - int(remainder), int(no_of_bars) + 1, bars)]
             indices.extend(frames)
             
-            comp = [np.abs(frame_times - (start_time + seconds_per_bar * n)).argmin() for n in range(bars - remainder, int(no_of_bars) + 1, bars)]
+            remainder -= int(remainder)
+            
+            comp = [np.abs(frame_times - (start_time + seconds_per_bar * n)).argmin() for n in range(bars - int(remainder), int(no_of_bars) + 1, bars)]
             compare_ind.extend(comp)
             
             # Make the slicing indices
-            beats = [start_beat + beats_per_bar * n for n in range(bars - remainder, int(no_of_bars) + 1, bars)]
+            beats = [start_beat + beats_per_bar * n for n in range(bars - int(remainder), int(no_of_bars) + 1, bars)]
             sequence_beats.extend(beats)
             
             # If the slice hyperparameter creates a remainder, we need to adjust the next slice
-            remainder = int(no_of_bars - (bars - remainder)) % bars 
+            remainder += (no_of_bars - (bars - int(remainder))) % bars 
                 
         
-        # # Plot the spectrogram along with the beats and cuts
-        # import matplotlib.pyplot as plt
-        # plt.figure(figsize=(10, 5))
-        # plt.imshow(spectrogram, aspect='auto', origin='lower')
-        # for idx in indices:
-        #     plt.axvline(idx, color='r', linewidth=1)
-        # plt.show()
+        if verbose:
+            # Plot the spectrogram along with the beats and cuts
+            import matplotlib.pyplot as plt
+            plt.figure(figsize=(10, 5))
+            plt.imshow(spectrogram, aspect='auto', origin='lower')
+            for idx in indices:
+                plt.axvline(idx, color='r', linewidth=1)
+            plt.show()
         
         # ---------------------- Extract the sequences using onset ---------------------- #
         sequence_beats = list(zip(sequence_beats[:-1], sequence_beats[1:]))
