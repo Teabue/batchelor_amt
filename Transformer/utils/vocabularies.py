@@ -89,11 +89,12 @@ class Vocabulary:
         # ------------------------------ Setup dataframe ----------------------------- #
         # Unravel the dataframe to have columns (pitch, type, time) where type is either onset or offset
         df_sequence['duration'] = df_sequence['offset'] - df_sequence['onset']
-        df_sequence = df_sequence.melt(id_vars=['pitch', 'duration'], value_vars=['onset', 'offset'], var_name='type', value_name='time')
+        df_sequence = df_sequence.melt(id_vars=['pitch', 'duration', 'onset_time'], value_vars=['onset', 'offset'], var_name='type', value_name='time')
         
         # Compute tie notes where the offset is greater than the duration
         df_tie_note_offset_rows = ((df_sequence['type'] == 'offset') & (df_sequence['time'] > duration))
         df_tie_note_offsets = df_sequence[df_tie_note_offset_rows]
+        df_tie_note_offsets['time'] -= duration # To get the offset relative to the duration of the next bar
         
         # Remove these rows from the sequence we want to tokenize
         df_sequence = df_sequence[~df_tie_note_offset_rows]
@@ -101,7 +102,6 @@ class Vocabulary:
         # If any of the ET notes are being offset now, append them to the df_sequence
         # Also concat the ET notes that are not being offset now to the df_tie_note_offsets
         if df_tie_notes is not None:
-            df_tie_notes['time'] -= duration
             df_sequence = pd.concat([df_sequence, df_tie_notes[df_tie_notes['time'] <= duration]])
             
             df_tie_note_offsets = pd.concat([df_tie_note_offsets, df_tie_notes[df_tie_notes['time'] > duration]])

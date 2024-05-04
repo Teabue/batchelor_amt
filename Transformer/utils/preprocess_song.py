@@ -351,42 +351,54 @@ class MuseScore(Song):
         remainder = 0
         for (start_beat, start_time), (end_beat, end_time), bpm, quarter_fraction in bpms_and_time_sig:
             
-            # Adjust starting times and beats if the song has incomplete measures
-            if start_time == 0 and self.pickup_measure:
-                # The first slice will include the pickup measure
-                start_beat = df[df['pitch'] == -1].iloc[0]['onset']
-                start_time = start_beat * 60 / bpm
-            if end_beat == self.score.quarterLength and self.compensation_measure:
-                # The last slicings will omit the compensation measure
-                end_beat = df[df['pitch'] == -1].iloc[-1]['onset']
-                end_time = start_time + (end_beat - start_beat) * 60 / bpm
+            mask = (df['onset'] >= start_beat) & (df['onset'] < end_beat)
+            df.loc[mask, 'onset_time'] = start_time + (df.loc[mask, 'onset'] - start_beat) * 60 / bpm
             
-            spec_time_duration = end_time - start_time
-            beat_duration = end_beat - start_beat
-            beats_per_bar = quarter_fraction * 4
-            no_of_bars = beat_duration / beats_per_bar
-            seconds_per_bar = spec_time_duration / no_of_bars
+        downbeats = df[df['pitch'] == -1]
+        for i in range(bars, len(downbeats), bars):
+            frames = np.searchsorted(frame_times, np.asarray([downbeats.iloc[i]['onset_time']]))
+            indices.extend(frames)
             
-            if np.isclose(remainder, np.round(remainder)):
-                remainder = np.round(remainder)
+            beats = [downbeats.iloc[i]['onset']]
+            sequence_beats.extend(beats)
+            
+            # # Adjust starting times and beats if the song has incomplete measures
+            # if start_time == 0 and self.pickup_measure:
+            #     # The first slice will include the pickup measure
+            #     start_beat = df[df['pitch'] == -1].iloc[0]['onset']
+            #     start_time = start_beat * 60 / bpm
+            # if end_beat == self.score.quarterLength and self.compensation_measure:
+            #     # The last slicings will omit the compensation measure
+            #     end_beat = df[df['pitch'] == -1].iloc[-1]['onset']
+            #     end_time = start_time + (end_beat - start_beat) * 60 / bpm
+            
+            # spec_time_duration = end_time - start_time
+            # beat_duration = end_beat - start_beat
+            # beats_per_bar = quarter_fraction * 4
+            # no_of_bars = beat_duration / beats_per_bar
+            # seconds_per_bar = spec_time_duration / no_of_bars
+            
+            # if np.isclose(remainder, np.round(remainder)):
+            #     remainder = np.round(remainder)
             
             # Find the frames that are closest to the start of each bar(s)
             # NOTE: Former looks more correct when inspecting, but intuitively, the latter seems more correct
-            frames = [np.min([np.searchsorted(frame_times, start_time + seconds_per_bar * n), spectrogram.shape[1] - 1]) for n in range(bars - int(remainder), int(no_of_bars) + 1, bars)]
-            indices.extend(frames)
+            # frames = [np.min([np.searchsorted(frame_times, start_time + seconds_per_bar * n), spectrogram.shape[1] - 1]) for n in range(bars - int(remainder), int(no_of_bars) + 1, bars)]
+            # indices.extend(frames)
             
-            remainder -= int(remainder)
+            # remainder -= int(remainder)
             
-            comp = [np.abs(frame_times - (start_time + seconds_per_bar * n)).argmin() for n in range(bars - int(remainder), int(no_of_bars) + 1, bars)]
-            compare_ind.extend(comp)
+            # comp = [np.abs(frame_times - (start_time + seconds_per_bar * n)).argmin() for n in range(bars - int(remainder), int(no_of_bars) + 1, bars)]
+            # compare_ind.extend(comp)
             
-            # Make the slicing indices
-            beats = [start_beat + beats_per_bar * n for n in range(bars - int(remainder), int(no_of_bars) + 1, bars)]
-            sequence_beats.extend(beats)
+            # # Make the slicing indices
+            # beats = [start_beat + beats_per_bar * n for n in range(bars - int(remainder), int(no_of_bars) + 1, bars)]
+            # sequence_beats.extend(beats)
             
-            # If the slice hyperparameter creates a remainder, we need to adjust the next slice
-            remainder += (no_of_bars - (bars - int(remainder))) % bars 
+            # # If the slice hyperparameter creates a remainder, we need to adjust the next slice
+            # remainder += (no_of_bars - (bars - int(remainder))) % bars 
                 
+        assert df['onset_time'].isna().any() == False
         
         if verbose:
             # Plot the spectrogram along with the beats and cuts
@@ -463,8 +475,8 @@ class MuseScore(Song):
 
         return merged
             
-    def preprocess(self, h_bars) -> None:
+    def preprocess(self, **kwargs) -> None:
         spectrogram = self.compute_spectrogram()
         df_onset_offset = self.compute_onset_offset_beats()
-        df_labels = self.compute_labels_and_segments(df_onset_offset, spectrogram, bars = h_bars)
+        df_labels = self.compute_labels_and_segments(df_onset_offset, spectrogram, **kwargs)
         return df_labels
