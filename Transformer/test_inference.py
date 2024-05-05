@@ -57,29 +57,33 @@ def create_midi_from_model_events(events, bpm_tempo, output_dir='', onset_only=F
 
     track.append(MetaMessage('end_of_track'))
 
-    mid.save(os.path.join(output_dir,'river_pred.midi'))
+    mid.save(os.path.join(output_dir,'pirate2_512.midi'))
 
 if __name__ == '__main__':
+    """HAHAHAHAH imagine at lave argparsers hahaha pfffff LOL #DovenskabLængeLeeeeeve"""
     
-    new_song_path = '/zhome/5d/a/168095/batchelor_amt/test_songs/river.mp3'
+    # -------------------------- Choose own custom song -------------------------- #
+    new_song_path = '/zhome/5d/a/168095/batchelor_amt/test_songs/Pirate_piano.mp3'
     test_new_song = True
-    bpm_tempo = 65
+    bpm_tempo = 133
+    sequence_length = 128
     
-    # ----------------------------- Choose test song ----------------------------- #
+    # ----------------------------- OR choose test song ----------------------------- #
     song_name = 'MIDI-Unprocessed_24_R1_2006_01-05_ORIG_MID--AUDIO_24_R1_2006_01_Track01_wav'
     data_dir = '/work3/s214629/preprocessed_data_best'
     test_preprocessing_works = False
-    # ------------------------------- Choose model ------------------------------- #
     
-    run_path = '/work3/s214629/run_a100_hope3/'
+    
+    # ------------------------------- Choose model ------------------------------- #
+    run_path = '/work3/s214629/run_a100_hope3_cont_smallest_lr'
     model_name = 'model_best.pth'
     
     # --------------------------------- Run stuff -------------------------------- #
-    with open("Transformer/configs/train_config.yaml", 'r') as f:
+    with open(os.path.join(run_path,'train_config.yaml'), 'r') as f:
         config = yaml.safe_load(f)
         
     # This is scuffed, but ignore it lolz
-    with open("Transformer/configs/vocab_config.yaml", 'r') as f:
+    with open(os.path.join(config['data_dir'],'vocab_config.yaml'), 'r') as f:
         vocab_configs = yaml.safe_load(f)
     vocab = Vocabulary(vocab_configs)
     vocab.define_vocabulary()
@@ -104,11 +108,10 @@ if __name__ == '__main__':
         spectrograms = pad_sequence(sequences, batch_first=True, padding_value=-1)
         
     else: 
-        # TODO WARNING THIS IS NOT FLEXIBLE
-        with open("Transformer/configs/preprocess_config.yaml", 'r') as f:
+        with open(os.path.join(config['data_dir'],'preprocess_config.yaml'), 'r') as f:
             preprocess_config = yaml.safe_load(f)
         song = Song(new_song_path,preprocess_config)
-        spectrograms = song.preprocess_inference_new_song()
+        spectrograms = song.preprocess_inference_new_song(sequence_length=sequence_length)
 
     spectrograms = spectrograms.to(device)
     if not test_preprocessing_works:
@@ -137,6 +140,7 @@ if __name__ == '__main__':
         raise ValueError('test_new_song and test_preprocessing_works cannot both be True.')
         
     if not test_new_song:
+        #TODO: Not flexible
         for root, dirs, files in os.walk('/work3/s214629/maestro-v3.0.0/maestro-v3.0.0'):
             if song_name + '.midi' in files:
                 bpm_tempo = MidiFile(os.path.join(root, song_name + '.midi')).tracks[0][0].tempo

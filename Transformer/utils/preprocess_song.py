@@ -5,6 +5,7 @@ import pandas as pd
 import mido
 import yaml
 import torch
+from typing import Optional, Union
 from utils.vocabularies import Vocabulary
 from torch.nn.utils.rnn import pad_sequence
 
@@ -53,10 +54,10 @@ class Song:
         np.save(save_path, spectrogram)
         return spectrogram
         
-    def preprocess_inference_new_song(self, sequence_size=128) -> torch.Tensor:
+    def preprocess_inference_new_song(self, sequence_length=128) -> torch.Tensor:
         spectrogram = self.compute_spectrogram()
         spectrogram = spectrogram.T
-        spectrogram_slices = torch.from_numpy(spectrogram).split(128,0)
+        spectrogram_slices = torch.from_numpy(spectrogram).split(sequence_length,0)
 
         spectrogram_slices = pad_sequence(list(spectrogram_slices), batch_first=True, padding_value=-1)
         
@@ -105,7 +106,7 @@ class Maestro(Song):
         return df
                 
                 
-    def compute_labels_and_segments(self, df, spectrogram):
+    def compute_labels_and_segments(self, df, spectrogram, sequence_length: Optional[Union[str,int]] = 'random') -> pd.DataFrame:
                 
         frame_times = librosa.frames_to_time(range(spectrogram.shape[1]), sr=self.config['sr'], hop_length=self.config['hop_length'])
 
@@ -122,8 +123,11 @@ class Maestro(Song):
         # While the total size is greater than the maximum size...
         while total_size > max_size:
             # Generate a random size between min_size and max_size
-            size = np.random.randint(min_size, max_size)
-
+            if sequence_length == 'random':
+                size = np.random.randint(min_size, max_size)
+            else: 
+                size = sequence_length
+                
             # Add the size to the list of sizes
             sizes.append(size)
 
@@ -186,6 +190,6 @@ class Maestro(Song):
     def preprocess(self) -> None:
         spectrogram = self.compute_spectrogram()
         df_onset_offset = self.compute_onset_offset_times()
-        df_labels = self.compute_labels_and_segments(df_onset_offset, spectrogram)
+        df_labels = self.compute_labels_and_segments(df_onset_offset, spectrogram, sequence_length=self.config['sequence_length'])
         return df_labels
 
