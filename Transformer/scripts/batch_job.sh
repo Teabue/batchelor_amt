@@ -1,16 +1,16 @@
 #!/bin/sh 
 ### General options 
 ### -- specify queue -- 
-#BSUB -q gpua100
+#BSUB -q gpuv100
 ### -- set the job Name -- 
-#BSUB -J AudioTransformer
+#BSUB -J AudioTransformer-BEAT
 ### -- ask for number of cores (default: 1) -- 
 #BSUB -n 4 
 ### -- specify that the cores must be on the same host -- 
 #BSUB -R "span[hosts=1]"
 
 #BSUB -gpu "num=1:mode=exclusive_process"
-#BSUB -R "select[gpu40gb]"
+#BSUB -R "select[gpu32gb]"
 ### -- specify that we need 4GB of memory per core/slot -- 
 #BSUB -R "rusage[mem=4GB]"
 ### -- specify that we want the job to get killed if it exceeds 5 GB per core/slot -- 

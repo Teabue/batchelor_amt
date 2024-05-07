@@ -34,9 +34,9 @@ class EventType:
         
         return int(token - self.token_start + self.min_max_values[0]) # NOTE: Assume only integer values for now
     
-    def translate_value_to_token(self, value):
+    def translate_value_to_token(self, value, song_name: str = 'Song_name_not_given'):
         if not value >= self.min_max_values[0] and value <= self.min_max_values[1]:
-            raise ValueError('Vocabulary: Value out of range')
+            raise ValueError(f'[ERROR] Vocabulary: Value {value} out of range for event {self.event_type} for song {song_name}')
         
         return int(value - self.min_max_values[0] + self.token_start)
         
@@ -54,7 +54,7 @@ class Vocabulary:
         return token_offset
     
     
-    def define_vocabulary(self):
+    def define_vocabulary(self, h_bars=None):
         self.vocabulary: dict[EventType, tuple[int,int]] = {} 
         token_offset = 0
         
@@ -63,11 +63,15 @@ class Vocabulary:
             token_offset = self._define_event(token_offset, special_token, (0,0))
 
         for event_type, min_max_values  in self.config['event_types'].items():
+            # Small hack for adjusting beat tokens depending on h_bars
+            if event_type == 'beat' and min_max_values == 'None':
+                min_max_values = [1, h_bars * 48]
+                
             token_offset = self._define_event(token_offset, event_type, min_max_values)
 
         self.vocab_size = token_offset 
 
-    def translate_sequence_events_to_tokens(self, duration, df_sequence: pd.DataFrame, df_tie_notes: pd.DataFrame) -> tuple[list[int], pd.DataFrame]:
+    def translate_sequence_events_to_tokens(self, duration, df_sequence: pd.DataFrame, df_tie_notes: pd.DataFrame,  song_name: str = 'Song_name_not_given') -> tuple[list[int], pd.DataFrame]:
         """See Transformer/docs/vocabulary.md for more info 
         
         Args:
@@ -82,7 +86,7 @@ class Vocabulary:
             duration_token = np.floor(duration / subdivision) + (duration // tuplet_subdivision - np.floor(duration / (1/sub_tup_common_beats)))
             token_sequence = []
             token_sequence.append(self.vocabulary['SOS'][0].translate_value_to_token(0))
-            token_sequence.append(self.vocabulary['beat'][0].translate_value_to_token(duration_token))
+            token_sequence.append(self.vocabulary['beat'][0].translate_value_to_token(duration_token,song_name))
             token_sequence.append(self.vocabulary['EOS'][0].translate_value_to_token(0))
             return token_sequence, None
         
@@ -142,7 +146,7 @@ class Vocabulary:
             
             # Update which beat we are currently on
             if beat_value - cur_beat != 0: 
-                token_sequence.append(self.vocabulary['beat'][0].translate_value_to_token(beat_token))
+                token_sequence.append(self.vocabulary['beat'][0].translate_value_to_token(beat_token,song_name))
             
             # Update current time
             cur_beat = beat_value
@@ -183,7 +187,7 @@ class Vocabulary:
         # time_shift_to_end = np.floor(duration - cur_beat)
         if cur_beat != duration:
             duration_token = np.floor(duration / subdivision) + (duration // tuplet_subdivision - np.floor(duration / (1/sub_tup_common_beats)))
-            token_sequence.append(self.vocabulary['beat'][0].translate_value_to_token(duration_token))
+            token_sequence.append(self.vocabulary['beat'][0].translate_value_to_token(duration_token,song_name))
         
         # Add EOS 
         token_sequence.append(self.vocabulary['EOS'][0].translate_value_to_token(0))
@@ -228,14 +232,19 @@ if __name__ == "__main__":
         print(f"Event: {event.event_type}, Range: {token_range}, Min-max: {event.min_max_values}")
     
     print('-'*40)
-    token_sequence = [1, 
-                      133, 108-12*4, 382, 
-                      132, 108-12*4, 1927, 
-                      133, 22+12*2, 26+12*2, 491, 
-                      132, 22+12*2, 
-                      133, 37+12, 32+12, 234, 
-                      132, 26+12*2, 37+12, 32+12, 13+12*3, 
-                      2, 0]
+    
+    print("Vocabulary size: ", vocab.vocab_size) 
+    
+    print('-'*40)
+    # token_sequence = [1, 
+    #                   133, 108-12*4, 382, 
+    #                   132, 108-12*4, 1927, 
+    #                   133, 22+12*2, 26+12*2, 491, 
+    #                   132, 22+12*2, 
+    #                   133, 37+12, 32+12, 234, 
+    #                   132, 26+12*2, 37+12, 32+12, 13+12*3, 
+    #                   2, 0]
+    token_sequence = [423, 420, 410]
     
     print("Translated sequence: ")
     for translated_event in vocab.translate_sequence_token_to_events(token_sequence):

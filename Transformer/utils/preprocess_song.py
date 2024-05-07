@@ -272,9 +272,11 @@ class MuseScore(Song):
                         next_chord = tied_note.next('Chord')
                         next_chord_offset = next_chord.offset if next_chord is not None else np.inf
                 
-                    tied_note = next_note if next_note_offset < next_chord_offset else next_chord                        
-                    midi_and_ties = np.array([(pi.pitch.midi, pi.tie) for pi in (tied_note.notes if isinstance(tied_note, chord.Chord) else [tied_note])])
-                    
+                    tied_note = next_note if next_note_offset < next_chord_offset else next_chord   
+                    try:                     
+                        midi_and_ties = np.array([(pi.pitch.midi, pi.tie) for pi in (tied_note.notes if isinstance(tied_note, chord.Chord) else [tied_note])])
+                    except AttributeError:
+                        raise AttributeError(f'Song {self.song_name} has a something wrong woth tie notes, getting None. Measure_number: {element.measureNumber}')
                     overlapping_pitches = np.any([[m1 == m2 and (t2 is not None and t2.type == "stop") for (m1, t1) in ele_notes] for (m2, t2) in midi_and_ties], axis = 0)
                     
                     # If it is a continuing tie, we need to update the duration of the pitches that are tied
@@ -426,13 +428,13 @@ class MuseScore(Song):
         with open("Transformer/configs/vocab_config.yaml", 'r') as f:
             vocab_configs = yaml.safe_load(f)
         vocab = Vocabulary(vocab_configs)
-        
-        vocab.define_vocabulary()
+
+        vocab.define_vocabulary(self.config['h_bars'])
         sequence_tokens = []
         df_tie_notes = None
         for (start_beat, end_beat), sequence_label in zip(sequence_beats, sequence_labels):
             sequence_duration = end_beat - start_beat
-            token_sequence, df_tie_notes = vocab.translate_sequence_events_to_tokens(sequence_duration, sequence_label, df_tie_notes)
+            token_sequence, df_tie_notes = vocab.translate_sequence_events_to_tokens(sequence_duration, sequence_label, df_tie_notes, self.song_name)
             sequence_tokens.append(token_sequence)
               
         # ---------------------------- Save the data --------------------------- #

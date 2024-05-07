@@ -1,6 +1,7 @@
 import multiprocessing
 import os 
 import pandas as pd
+pd.options.mode.chained_assignment = None  # default='warn'
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from itertools import cycle
@@ -104,8 +105,26 @@ if __name__ == '__main__':
     # Copy over the configs used for preprocessing 
     os.makedirs(configs['output_dir'], exist_ok=True)
     shutil.copy('Transformer/configs/preprocess_config.yaml', os.path.join(configs['output_dir'], "preprocess_config.yaml"))
-    shutil.copy('Transformer/configs/vocab_config.yaml', os.path.join(configs['output_dir'], "vocab_config.yaml"))
+    
+    # shutil.copy('Transformer/configs/vocab_config.yaml', os.path.join(configs['output_dir'], "vocab_config.yaml"))
 
+    # -------------- Small hack to change the vocab_config.yaml beat ------------- #
+    from ruamel.yaml import YAML
+
+    # Create YAML object
+    yaml = YAML()
+    # Load existing config
+    with open('Transformer/configs/vocab_config.yaml', 'r') as file:
+        vocab_configs = yaml.load(file)
+
+    # Modify 'beat' key
+    vocab_configs['event_types']['beat'] = [1, configs['h_bars'] * 48]
+
+    # Save to new file in output directory
+    with open(os.path.join(configs['output_dir'], 'vocab_config.yaml'), 'w') as file:
+        yaml.dump(vocab_configs, file)
+    # ------------------------------------- w ------------------------------------ #
+    
     preprocessor = DataPreprocessor(configs)
     
     preprocessor.preprocess()
