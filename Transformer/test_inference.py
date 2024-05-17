@@ -208,6 +208,8 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
             value = int(value)
         
         if event == "SOS":
+            if eos_beats != beat:
+                eos_beats = beat
             et_switch = True
         
         elif event == 'downbeat':
@@ -301,19 +303,19 @@ def _get_note_value(pitch):
     return (notes[pitch % 12], str(octaves[pitch // 12] - 1))
 
 if __name__ == '__main__':
-    
-    new_song_path = "/Users/helenakeitum/Desktop/midis/pirate_ensemble_105.mp3" # '/zhome/5d/a/168095/batchelor_amt/test_songs/river.mp3'
-    test_new_song = False
-    bpm_tempo = 100 # 65
+    inference_dir = "inference_songs"
+    new_song_name = "pirate_ensemble_105.mp3"
+    new_song_path = os.path.join(inference_dir, new_song_name) # '/zhome/5d/a/168095/batchelor_amt/test_songs/river.mp3'
+    test_new_song = True
     
     # ----------------------------- Choose test song ----------------------------- #
     song_name = "Confronting_Myself_Celeste_Piano_Collections_-_Lena_RaineTrevor_Alan_Gomes" # 'MIDI-Unprocessed_24_R1_2006_01-05_ORIG_MID--AUDIO_24_R1_2006_01_Track01_wav'
     data_dir = "preprocessed_data_best" # '/work3/s214629/preprocessed_data_best'
-    test_preprocessing_works = True
+    test_preprocessing_works = False
     # ------------------------------- Choose model ------------------------------- #
     
     run_path = "" # '/work3/s214629/run_a100_hope3/'
-    model_name = 'model_best.pth'
+    model_name = '07-05-24_musescore.pth'
     
     # --------------------------------- Run stuff -------------------------------- #
     with open("Transformer/configs/train_config.yaml", 'r') as f:
@@ -326,10 +328,9 @@ if __name__ == '__main__':
     vocab.define_vocabulary()
     tgt_vocab_size = vocab.vocab_size
 
-
-
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    saved = False
+    saved = True
+    only_save = False
     
     if not saved:
         if not test_new_song:
@@ -360,6 +361,7 @@ if __name__ == '__main__':
             spectrograms = song.preprocess_inference_new_song()
 
         spectrograms = spectrograms.to(device)
+        
         if not test_preprocessing_works:
             model = Transformer(config['n_mel_bins'], tgt_vocab_size, config['d_model'], config['num_heads'], config['num_layers'], config['d_ff'], config['max_seq_length'], config['dropout'], device)
             model.load_state_dict(torch.load(os.path.join(run_path, 'models', model_name), map_location=device))
@@ -375,6 +377,9 @@ if __name__ == '__main__':
                 output = output.squeeze()
                 events = vocab.translate_sequence_token_to_events(output.tolist())
                 all_sequence_events.extend(events)
+            
+            np.save(os.path.join(inference_dir, new_song_name), all_sequence_events)
+        
         elif not test_new_song:
             # Create a midi based off of the ground truths
             all_sequence_events = []
@@ -391,7 +396,7 @@ if __name__ == '__main__':
         #             bpm_tempo = MidiFile(os.path.join(root, song_name + '.midi')).tracks[0][0].tempo
         #             break
     else:
-        all_sequence_events = np.load('/Users/helenakeitum/Desktop/saved_seq_events.npy', allow_pickle=True)
+        all_sequence_events = np.load(os.path.join(inference_dir, new_song_name + '.npy'), allow_pickle=True)
     
     token_sequence = [1, 
                       133, 108-12*4, 135, 
@@ -403,5 +408,7 @@ if __name__ == '__main__':
                       2, 0]
     # events = vocab.translate_sequence_token_to_events(token_sequence)
     
-    translate_events_to_sheet_music(all_sequence_events, bpm = bpm_tempo, output_dir=f"{song_name}")
+    if not only_save:
+        bpm_tempo = 100 # 65
+        translate_events_to_sheet_music(all_sequence_events, bpm = bpm_tempo, output_dir=f"{song_name}")
     # create_midi_from_model_events(all_sequence_events, bpm_tempo, output_dir="/Users/helenakeitum/Desktop", onset_only=False)

@@ -8,7 +8,7 @@ special_tokens:
 event_types: 
   pitch: [-1, 127] # Note that the -1 token is a helper token to mark downbeats and does not represent a pitch in of itself
   offset_onset: [0, 1]  # 1 is onset, 0 is offset
-  beat: None #  Dynamically set inside vocabularies.py with the assumption of 32 notes and 16 tuplets (48 total)
+  beat: [1, 500] #  Dynamically set inside vocabularies.py with the assumption of 32 notes and 16 tuplets (48 total)
 
 # NOTE IF USING SOMETHING ELSE THAN 48, THEN CHANGE IT MANUALLY INSIDE define_vocabulary() in vocabularies.py
 
