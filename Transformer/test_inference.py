@@ -99,11 +99,6 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]], bpm: 
     df.sort_values('onset', inplace=True)
     
     # TODO: Fix this. It's a hacky solution to get around the fact that the first note is a short rest
-    if df['full_note'] == 'Rest' and abs(df['duration'][0] - 0.125) < df['duration'][0]:
-        # Recalibrate the onset
-        df['onset'] = df['onset'] - df['offset'].iloc[0]
-        df['offset'] = df['offset'] - df['offset'].iloc[0]
-        df = df.iloc[1:]
     
     for idx, row in df.iterrows():
         if row['duration'] == 0:
@@ -163,7 +158,7 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]], bpm: 
     score.write('musicxml', fp=output_dir)
 
 
-def _update_pitches(self, score, key_sig) -> stream.Score:
+def _update_pitches(score, key_sig) -> stream.Score:
     for n in score.recurse().notes:
         if isinstance(n, chord.Chord):
             for n_ in n:
@@ -175,7 +170,7 @@ def _update_pitches(self, score, key_sig) -> stream.Score:
 
     return score
 
-def _prepare_data_frame(self, event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
+def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
     df = pd.DataFrame(columns=['full_note', 'pitch', 'octave', 'onset', 'offset'])
     
     time = 0
@@ -212,9 +207,6 @@ def _prepare_data_frame(self, event_sequence: list[tuple[str, int]]) -> pd.DataF
             # Convert the time shift to seconds
             time_shift_in_seconds = value * 10 / 1000 # 1 bin is 10 ms
             
-            # If we are not onsetting and skipping in time, we have a rest!
-            if not onset_switch:
-                df = pd.concat([df, pd.DataFrame([{'full_note': "Rest", 'pitch': "-", 'octave': "-", 'onset': time, 'offset': time + time_shift_in_seconds}])], ignore_index=True)
             
             # Update the current time
             time += time_shift_in_seconds
@@ -222,7 +214,7 @@ def _prepare_data_frame(self, event_sequence: list[tuple[str, int]]) -> pd.DataF
     return df
 
 
-def _get_note_value(self, pitch):
+def _get_note_value(pitch):
     # NOTE perhaps less octaves. 
     # a piano has 8 octaves and musescore doesn't even allow that many
     notes = {0: "C", 1: "C#", 2: "D", 3: "D#", 4: "E", 5: "F", 
@@ -245,7 +237,7 @@ if __name__ == '__main__':
     # ------------------------------- Choose model ------------------------------- #
     
     run_path = "" # '/work3/s214629/run_a100_hope3/'
-    model_name = 'model_best.pth'
+    model_name = 'model_best_time_shift.pth'
     
     # --------------------------------- Run stuff -------------------------------- #
     with open("Transformer/configs/train_config.yaml", 'r') as f:
@@ -301,6 +293,9 @@ if __name__ == '__main__':
                 output = output.squeeze()
                 events = vocab.translate_sequence_token_to_events(output.tolist())
                 all_sequence_events.extend(events)
+            
+            # TODO: Not flexible. Change this later
+            np.save('/Users/helenakeitum/Desktop/saved_seq_events.npy', all_sequence_events)
         elif not test_new_song:
             # Create a midi based off of the ground truths
             all_sequence_events = []
