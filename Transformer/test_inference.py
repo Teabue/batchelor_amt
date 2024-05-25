@@ -84,11 +84,6 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]],
     # treble_staff.timeSignature = meter.TimeSignature('4/4')
     # bass_staff.timeSignature = meter.TimeSignature('4/4')
     
-    # Add the metronome mark to the score
-    metronome_mark = tempo.MetronomeMark(number=bpm)
-    treble_staff.insert(0, metronome_mark)
-    bass_staff.insert(0, metronome_mark)
-    
     df = _prepare_data_frame(event_sequence)
     print("Dataframe prepared!")
     
@@ -96,6 +91,7 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]],
     df['duration'] = (df['offset'] - df['onset'])
     last_recorded_downbeat = None
     beats_per_bar = 0
+    cur_bpm = 0
     for idx, row in df.iterrows():
         
         if row['full_note'] == "Downbeat":
@@ -118,11 +114,27 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]],
 
             last_recorded_downbeat = row['onset']
             
+            if row['bpm'] != cur_bpm:
+                # Add the metronome mark to the score
+                metronome_mark = tempo.MetronomeMark(number = row['bpm'])
+                treble_staff.insert(last_recorded_downbeat, metronome_mark)
+                bass_staff.insert(last_recorded_downbeat, metronome_mark)
+                
+                cur_bpm = row['bpm']
+            
             continue
                 
         xml_note = note.Note(row['full_note'])
         xml_note.duration = duration.Duration(row['duration'])
         xml_note.offset = row['onset']
+        
+        if row['bpm'] != cur_bpm:
+            # Add the metronome mark to the score
+            metronome_mark = tempo.MetronomeMark(number = row['bpm'])
+            treble_staff.insert(xml_note.offset, metronome_mark)
+            bass_staff.insert(xml_note.offset, metronome_mark)
+            
+            cur_bpm = row['bpm']
         
         if row['duration'] == 0:
             xml_note = xml_note.getGrace()
@@ -194,13 +206,13 @@ def _update_pitches(score, key_sig) -> stream.Score:
     return score
 
 def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
-    df = pd.DataFrame(columns=['full_note', 'pitch', 'octave', 'onset', 'offset'])
+    df = pd.DataFrame(columns=['full_note', 'onset', 'offset', 'bpm'])
     
     beat = 0
     eos_beats = 0
     last_downbeat_onset = 0
+    bpm = 0
     notes_to_concat: dict[str, list[int]] = {}
-    possible_grace_notes = {}
     et_switch = False
     onset_switch = False
     for idx, (event, value) in enumerate(event_sequence):
@@ -212,9 +224,12 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
                 eos_beats = beat
             et_switch = True
         
+        if event == "tempo":
+            bpm = value
+        
         elif event == 'downbeat':
             last_downbeat_onset = beat
-            df = pd.concat([df, pd.DataFrame([{'full_note': "Downbeat", 'pitch': "-", 'octave': "-", 'onset': last_downbeat_onset, 'offset': last_downbeat_onset}])], ignore_index=True)
+            df = pd.concat([df, pd.DataFrame([{'full_note': "Downbeat", 'onset': last_downbeat_onset, 'offset': last_downbeat_onset, 'bpm': bpm}])], ignore_index=True)
         
         elif event == "ET":
             et_switch = False
@@ -239,9 +254,6 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
                 if note_ in notes_to_concat.keys():
                     print(f"Note ({note_}) is set to onset again before offset!")
                     notes_to_concat[note_].append(beat)
-                elif note_ in possible_grace_notes.keys():
-                    # Save the note with the corresponding onset time
-                    df = pd.concat([df, pd.DataFrame([{'full_note': note_, 'pitch': value, 'octave': octave_value, 'onset': possible_grace_notes.pop(note_), 'offset': beat}])], ignore_index=True)
                 else:
                     # Save the note with the corresponding onset time
                     notes_to_concat[note_] = [beat]
@@ -249,8 +261,7 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
             elif not et_switch and not onset_switch:
                 if note_ not in notes_to_concat.keys():
                     # This shouldn't happen but I'll allow it and skip it
-                    print(f"Note ({note_}) not found in list. Could it be a grace note?")
-                    possible_grace_notes[note_] = beat
+                    print(f"Note ({note_}) not found in list.")
                     continue
                 
                 if len(notes_to_concat[note_]) > 1:
@@ -262,12 +273,9 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
                     # Remove from the dict and add to the dataframe
                     df_onset = notes_to_concat.pop(note_)[0]
                 
-                df = pd.concat([df, pd.DataFrame([{'full_note': note_, 'pitch': note_value, 'octave': octave_value, 'onset': df_onset, 'offset': beat}])], ignore_index=True)
+                df = pd.concat([df, pd.DataFrame([{'full_note': note_, 'onset': df_onset, 'offset': beat, 'bpm': bpm}])], ignore_index=True)
         
         elif event == "beat":
-            # We have shifted a beat so the saved grace notes are no longer relevant
-            possible_grace_notes = {}
-            
             # Find indices of the tuplets
             sub_beats = np.arange(0, 1, vocab_configs['subdivision'])
             tup_beats = np.arange(0, 1, Fraction(vocab_configs['tuplet_subdivision']))
@@ -306,12 +314,12 @@ if __name__ == '__main__':
     inference_dir = "inference_songs"
     new_song_name = "pirate_ensemble_105.mp3"
     new_song_path = os.path.join(inference_dir, new_song_name) # '/zhome/5d/a/168095/batchelor_amt/test_songs/river.mp3'
-    test_new_song = True
+    test_new_song = False
     
     # ----------------------------- Choose test song ----------------------------- #
-    song_name = "Confronting_Myself_Celeste_Piano_Collections_-_Lena_RaineTrevor_Alan_Gomes" # 'MIDI-Unprocessed_24_R1_2006_01-05_ORIG_MID--AUDIO_24_R1_2006_01_Track01_wav'
-    data_dir = "preprocessed_data_best" # '/work3/s214629/preprocessed_data_best'
-    test_preprocessing_works = False
+    song_name = "Pokemon_Ruby_Sapphire_Emerald_Ending_Credits_Theme" # 'MIDI-Unprocessed_24_R1_2006_01-05_ORIG_MID--AUDIO_24_R1_2006_01_Track01_wav'
+    data_dir = "preprocessed_data/21-05-24" # '/work3/s214629/preprocessed_data_best'
+    test_preprocessing_works = True
     # ------------------------------- Choose model ------------------------------- #
     
     run_path = "" # '/work3/s214629/run_a100_hope3/'
@@ -329,7 +337,7 @@ if __name__ == '__main__':
     tgt_vocab_size = vocab.vocab_size
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    saved = True
+    saved = False
     only_save = False
     
     if not saved:
@@ -337,7 +345,7 @@ if __name__ == '__main__':
             spectrogram = np.load(os.path.join(data_dir, 'spectrograms', f'{song_name}.npy'))
             
             for i in ['train', 'val', 'test']:              
-                df = pd.read_csv(os.path.join(data_dir, i, 'labels.csv'))
+                df = pd.read_csv(os.path.join(data_dir, i, 'worker_0.csv'))
                 
                 if (df['song_name'] == song_name).any():
                     break

@@ -82,6 +82,7 @@ class Vocabulary:
         
         # ---------------- In case no notes are played in the sequence --------------- #
         # NOTE: Should downbeats be present here?
+        # TODO: What if the entire sequence is just one long ET that doesn't stop?
         if len(df_sequence) == 0:
             duration_token = np.floor(duration / subdivision) + (duration // tuplet_subdivision - np.floor(duration / (1/sub_tup_common_beats)))
             token_sequence = []
@@ -93,7 +94,7 @@ class Vocabulary:
         # ------------------------------ Setup dataframe ----------------------------- #
         # Unravel the dataframe to have columns (pitch, type, time) where type is either onset or offset
         df_sequence['duration'] = df_sequence['offset'] - df_sequence['onset']
-        df_sequence = df_sequence.melt(id_vars=['pitch', 'duration', 'onset_time'], value_vars=['onset', 'offset'], var_name='type', value_name='time')
+        df_sequence = df_sequence.melt(id_vars=['pitch', 'duration'], value_vars=['onset', 'offset'], var_name='type', value_name='time')
         
         # Compute tie notes where the offset is greater than the duration
         df_tie_note_offset_rows = ((df_sequence['type'] == 'offset') & (df_sequence['time'] > duration))
@@ -157,23 +158,28 @@ class Vocabulary:
             onset_rows = onset_rows.sort_values(by='pitch')
             offset_rows = offset_rows.sort_values(by='pitch')
             
-            possible_grace_notes = onset_rows[(onset_rows['pitch'] != -1) & (onset_rows['duration'] == 0)]
+            possible_grace_notes = onset_rows[(onset_rows['pitch'] >= 0) & (onset_rows['duration'] == 0)]
             
+            # Look for tempo change
+            if np.any(onset_rows['pitch'].values < -1):
+                token_sequence.append(self.vocabulary['tempo'][0].translate_value_to_token(-onset_rows['pitch'].iloc[0]))
+            # Look for downbeat
+            if -1 in onset_rows['pitch'].values:
+                token_sequence.append(self.vocabulary['downbeat'][0].translate_value_to_token(0))
+                 
             # Start with offsetting before onsetting
-            if len(offset_rows) > 0:
-                # Don't add offset tokens for downbeat or grace notes (yet)
+            if len(offset_rows) > 0:    
+                # Don't add offset for special tokens or grace notes (yet - preserve hierarchy)
                 if np.any(offset_rows['duration'].values != 0):
                     token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(0))
-                    token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in offset_rows.iterrows() if not (row['pitch'] == -1 or row['pitch'] in possible_grace_notes['pitch'].values))
+                    token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in offset_rows.iterrows() if row['duration'] != 0)
                 
             if len(onset_rows) > 0:
-                if -1 in onset_rows['pitch'].values:
-                    token_sequence.append(self.vocabulary['downbeat'][0].translate_value_to_token(0))
-                        
-                # Don't add onset tokens if it's just a downbeat and no notes
-                if not (len(onset_rows) == 1 and onset_rows['pitch'].values[0] == -1):
+                       
+                # Only add pitch tokens - a grace note is always accompanied by a note with a duration
+                if np.any(onset_rows['duration'].values != 0):
                     token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(1))
-                    token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in onset_rows.iterrows() if row['pitch'] != -1)
+                    token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in onset_rows.iterrows() if row['pitch'] > 0)
 
                 # Now add grace notes offsets (to preserve onset/offset convention)
                 if not possible_grace_notes.empty:

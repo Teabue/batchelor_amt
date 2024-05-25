@@ -232,6 +232,11 @@ class MuseScore(Song):
         # Load the MusicXML file
         df = pd.DataFrame(columns=['pitch', 'onset', 'offset']) # xml_pitch, onset time and offset time in beats
         
+        # ---------------------- Add tempo ---------------------- #
+        bpms_and_time_sig = self._merge_bpms_and_time_signatures()
+        for (start_beat, start_time), (end_beat, end_time), bpm, quarter_fraction in bpms_and_time_sig:
+            df = pd.concat([df, pd.DataFrame([{'pitch': -bpm, 'onset': start_beat, 'offset': start_beat}])], ignore_index=True)
+        
         # ---------------------- Add downbeats ---------------------- #
         for measure in self.score.parts[0].getElementsByClass(stream.Measure):
             # Check if it's a pickup measure (anacrusis)
@@ -296,53 +301,12 @@ class MuseScore(Song):
         return df
     
     def compute_labels_and_segments(self, df, spectrogram, bars = 1, verbose = False):
-        # Extract tempo(s) from the score
-        mm_marks = self.score.metronomeMarkBoundaries()
-        # tempos = [(msg.time, mido.tempo2bpm(msg.tempo)) for msg in self.midi.tracks[0] if msg.type == "set_tempo"]
-        # times = [(msg.time, msg.numerator / msg.denominator) for msg in self.midi.tracks[0] if msg.type == "time_signature"]
         
-        # Make a list of list with the start and end indices of the bpm changes
-        bpms_offsets, bpms = [], []
-        for i, (bpm_start, bpm_end, bpm) in enumerate(mm_marks):
-            if not bpms:
-                bpms.append(bpm.getQuarterBPM())
-                bpms_offsets.append(bpm_start)
-            else:
-                # During expansion, it can occur that the same bpm gets added again
-                if bpms[-1] != bpm.getQuarterBPM():
-                    bpms.append(bpm.getQuarterBPM())    
-                    
-                    # Manual time signature inserts should be omitted to avoid duplicates
-                    if bpm_start not in bpms_offsets:
-                        bpms_offsets.append(bpm_start)
-        bpms_offsets.append(bpm_end)
-        
-        bpms = list(zip(bpms_offsets[:-1], bpms_offsets[1:], bpms))
-        bpms = np.asarray(bpms)
-        
-        # Do the same with the time signatures
-        time_signatures = self.score.getTimeSignatures()
-        t_offsets, t_ratios = [], []
-        for i, ts in enumerate(time_signatures):
-            if not t_ratios:
-                t_ratios.append(ts.numerator / ts.denominator)
-                t_offsets.append(ts.offset)
-            else:
-                # During expansion, it can occur that the same time signature gets added again
-                if t_ratios[-1] != ts.numerator / ts.denominator:
-                    t_ratios.append(ts.numerator / ts.denominator)    
-                    
-                    # Manual time signature inserts should be omitted to avoid duplicates
-                    if ts.offset not in t_offsets:
-                        t_offsets.append(ts.offset)
-        t_offsets.append(self.score.quarterLength)
-        
-        time_signature_offsets_and_ratios = list(zip(t_offsets[:-1], t_offsets[1:], t_ratios))
-        time_signature_offsets_and_ratios = np.asarray(time_signature_offsets_and_ratios)
-    
-        # Merge the bpms and time signatures to get a temporal overview
-        bpms_and_time_sig = self._merge_bpms_and_time_signatures(bpms, time_signature_offsets_and_ratios)
-        
+        # Calculate the onset time of all notes
+        for (start_beat, start_time), (end_beat, end_time), bpm, quarter_fraction in self._merge_bpms_and_time_signatures():
+            mask = (df['onset'] >= start_beat) & (df['onset'] < end_beat)
+            df.loc[mask, 'onset_time'] = start_time + (df.loc[mask, 'onset'] - start_beat) * 60 / bpm
+            
         # Convert frame indices to time
         frame_times = librosa.frames_to_time(range(spectrogram.shape[1]), sr=self.config['sr'], hop_length=self.config['hop_length'], n_fft=self.config['n_fft'])
         
@@ -351,11 +315,6 @@ class MuseScore(Song):
         compare_ind = [0]
         sequence_beats = [0]
         remainder = 0
-        for (start_beat, start_time), (end_beat, end_time), bpm, quarter_fraction in bpms_and_time_sig:
-            
-            mask = (df['onset'] >= start_beat) & (df['onset'] < end_beat)
-            df.loc[mask, 'onset_time'] = start_time + (df.loc[mask, 'onset'] - start_beat) * 60 / bpm
-            
         downbeats = df[df['pitch'] == -1]
         for i in range(bars, len(downbeats), bars):
             frames = np.searchsorted(frame_times, np.asarray([downbeats.iloc[i]['onset_time']]))
@@ -443,7 +402,49 @@ class MuseScore(Song):
         
         return df
 
-    def _merge_bpms_and_time_signatures(self, bpms, time_signature_offsets_and_ratios):
+    def _merge_bpms_and_time_signatures(self):
+        # Extract tempo(s) from the score
+        mm_marks = self.score.metronomeMarkBoundaries()
+        
+        # Make a list of list with the start and end indices of the bpm changes
+        bpms_offsets, bpms = [], []
+        for i, (bpm_start, bpm_end, bpm) in enumerate(mm_marks):
+            if not bpms:
+                bpms.append(bpm.getQuarterBPM())
+                bpms_offsets.append(bpm_start)
+            else:
+                # During expansion, it can occur that the same bpm gets added again
+                if bpms[-1] != bpm.getQuarterBPM():
+                    bpms.append(bpm.getQuarterBPM())    
+                    
+                    # Manual time signature inserts should be omitted to avoid duplicates
+                    if bpm_start not in bpms_offsets:
+                        bpms_offsets.append(bpm_start)
+        bpms_offsets.append(bpm_end)
+        
+        bpms = list(zip(bpms_offsets[:-1], bpms_offsets[1:], bpms))
+        bpms = np.asarray(bpms)
+        
+        # Do the same with the time signatures
+        time_signatures = self.score.getTimeSignatures()
+        t_offsets, t_ratios = [], []
+        for i, ts in enumerate(time_signatures):
+            if not t_ratios:
+                t_ratios.append(ts.numerator / ts.denominator)
+                t_offsets.append(ts.offset)
+            else:
+                # During expansion, it can occur that the same time signature gets added again
+                if t_ratios[-1] != ts.numerator / ts.denominator:
+                    t_ratios.append(ts.numerator / ts.denominator)    
+                    
+                    # Manual time signature inserts should be omitted to avoid duplicates
+                    if ts.offset not in t_offsets:
+                        t_offsets.append(ts.offset)
+        t_offsets.append(self.score.quarterLength)
+        
+        time_signature_offsets_and_ratios = list(zip(t_offsets[:-1], t_offsets[1:], t_ratios))
+        time_signature_offsets_and_ratios = np.asarray(time_signature_offsets_and_ratios)
+        
         # Initialize an empty list to store the merged BPMs and time signatures
         merged = []
 
