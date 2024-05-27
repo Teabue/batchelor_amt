@@ -65,7 +65,7 @@ class Vocabulary:
         for event_type, min_max_values  in self.config['event_types'].items():
             # Small hack for adjusting beat tokens depending on h_bars
             if event_type == 'beat' and min_max_values == 'None':
-                min_max_values = [1, h_bars * 48]
+                min_max_values = [1, h_bars * 12]
                 
             token_offset = self._define_event(token_offset, event_type, min_max_values)
 
@@ -79,6 +79,7 @@ class Vocabulary:
         """        
         subdivision = self.config["subdivision"]
         tuplet_subdivision = Fraction(self.config["tuplet_subdivision"])
+        sub_tup_common_beats = len(np.intersect1d(np.arange(0, 1, subdivision), np.arange(0, 1, tuplet_subdivision)))
         
         # ---------------- In case no notes are played in the sequence --------------- #
         # NOTE: Should downbeats be present here?
@@ -92,6 +93,12 @@ class Vocabulary:
             return token_sequence, None
         
         # ------------------------------ Setup dataframe ----------------------------- #
+        # Retrieve the initial tempo and remove from the dataframe
+        tempo = -df_sequence.iloc[0]['pitch']
+        if tempo <= 1:
+            raise ValueError(f"Dataframe does not start with tempo. Got: {tempo}")
+        df_sequence = df_sequence[df_sequence.index > 0]
+        
         # Unravel the dataframe to have columns (pitch, type, time) where type is either onset or offset
         df_sequence['duration'] = df_sequence['offset'] - df_sequence['onset']
         df_sequence = df_sequence.melt(id_vars=['pitch', 'duration'], value_vars=['onset', 'offset'], var_name='type', value_name='time')
@@ -119,14 +126,14 @@ class Vocabulary:
         df_sequence = df_sequence.sort_values(by='time')
         
         # How many tuplets did we pass on the way (not including 1-beat tuplets)
-        sub_tup_common_beats = len(np.intersect1d(np.arange(0, 1, subdivision), np.arange(0, 1, tuplet_subdivision)))
         df_sequence['increment'] = df_sequence['time'] // tuplet_subdivision - np.floor(df_sequence['time'] / (1/sub_tup_common_beats))  
         # df_sequence['time'] = np.floor(df_sequence['time'] / subdivision) + df_sequence['increment']
         
         token_sequence = []
         # Add the start of sequence token
         token_sequence.append(self.vocabulary['SOS'][0].translate_value_to_token(0))
-
+        token_sequence.append(self.vocabulary['tempo'][0].translate_value_to_token(tempo))
+        
         # ----------------------------- Declare tie notes ----------------------------- #
         # NOTE: ET tokens happen before downbeats
         if df_tie_notes is not None:
@@ -179,7 +186,7 @@ class Vocabulary:
                 # Only add pitch tokens - a grace note is always accompanied by a note with a duration
                 if np.any(onset_rows['duration'].values != 0):
                     token_sequence.append(self.vocabulary['offset_onset'][0].translate_value_to_token(1))
-                    token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in onset_rows.iterrows() if row['pitch'] > 0)
+                    token_sequence.extend(self.vocabulary['pitch'][0].translate_value_to_token(row['pitch']) for _, row in onset_rows.iterrows() if row['pitch'] >= 0)
 
                 # Now add grace notes offsets (to preserve onset/offset convention)
                 if not possible_grace_notes.empty:
@@ -225,13 +232,15 @@ class Vocabulary:
 if __name__ == "__main__":
     import yaml
 
-    
+    with open('Transformer/configs/preprocess_config.yaml', 'r') as file:
+        p_config = yaml.safe_load(file)
+        
     with open('Transformer/configs/vocab_config.yaml', 'r') as file:
         config = yaml.safe_load(file)
     
     vocab = Vocabulary(config)
     
-    vocab.define_vocabulary()
+    vocab.define_vocabulary(p_config['max_beats'])
     
     print("Vocabulary ranges: ")
     for token_range, (event, token_range) in vocab.vocabulary.items():

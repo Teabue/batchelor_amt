@@ -50,7 +50,8 @@ def train_model(model,
             tokens = tokens.to(device)
             
             output = model(src=spectrograms, tgt=tokens[:, :-1])
-            loss = criterion(output.contiguous().view(-1, tgt_vocab_size), tokens[:, 1:].contiguous().view(-1))
+            output = output[:, 1:, :] # Remove the prediction of the second token because we give it two tokens right off
+            loss = criterion(output.contiguous().view(-1, tgt_vocab_size), tokens[:, 2:].contiguous().view(-1)) # tokens[:, 2:] - Don't account loss for neither SOS or declared tempo
             
             optimizer.zero_grad()
             
@@ -132,10 +133,14 @@ def simple_setup(device = 'cuda',
                 data_parallelism=False):
 
     # TODO: Temporary solution, way into the future when I actually feel like refactoring, I'll save config run files
+    with open(os.path.join(data_dir,'preprocess_config.yaml'), 'r') as file:
+        p_config = yaml.safe_load(file)
+    
     with open(os.path.join(data_dir,'vocab_config.yaml'), 'r') as file:
         config = yaml.safe_load(file)
+        
     vocab = Vocabulary(config)
-    vocab.define_vocabulary()
+    vocab.define_vocabulary(p_config['max_beats'])
     
     tgt_vocab_size = vocab.vocab_size
     

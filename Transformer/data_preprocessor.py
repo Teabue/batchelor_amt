@@ -31,7 +31,7 @@ class DataPreprocessor:
             if song.expansion_succes is False:
                 continue
             
-            df_song = song.preprocess(bars = self.config['h_bars'], verbose = False)
+            df_song = song.preprocess(verbose = False)
             
             save_path = os.path.join(self.config['output_dir'], split, f'worker_{worker_nr}.csv')
             if not os.path.exists(save_path):
@@ -118,7 +118,7 @@ if __name__ == '__main__':
         vocab_configs = yaml.load(file)
 
     # Modify 'beat' key
-    vocab_configs['event_types']['beat'] = [1, configs['h_bars'] * 48]
+    vocab_configs['event_types']['beat'] = [1, configs['max_beats'] * 12]
 
     # Save to new file in output directory
     with open(os.path.join(configs['output_dir'], 'vocab_config.yaml'), 'w') as file:

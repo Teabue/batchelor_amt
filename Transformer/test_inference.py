@@ -15,7 +15,86 @@ from utils.vocabularies import Vocabulary
 from utils.preprocess_song import Song
 from utils.model import Transformer
 
+def test_preprocessing(data_dir: str):
+    songs_dir = os.path.join(data_dir, "spectrograms")
+    songs = [os.path.splitext(file)[0] for file in os.listdir(songs_dir)]
+    
+    for song_name in songs:
+        spectrogram = np.load(os.path.join(data_dir, 'spectrograms', f'{song_name}.npy'))
+        
+        for i in ['train', 'val', 'test']:              
+            df = pd.read_csv(os.path.join(data_dir, i, 'labels.csv'))
+            
+            if (df['song_name'] == song_name).any():
+                break
+            
+        df = df[df['song_name'] == song_name] # get all segments of the song
 
+        sequences = []
+        for idx, row in df.iterrows():
+            sequence = spectrogram[:, int(row['sequence_start_idx']): int(row['sequence_end_idx'])]
+            sequence = sequence.T
+            sequence = torch.from_numpy(sequence)
+            sequences.append(sequence)
+        
+        spectrograms = pad_sequence(sequences, batch_first=True, padding_value=-1)
+        spectrograms = spectrograms.to(device)
+        
+        # Create a sheet based off of the ground truths
+        sequence_events = []
+        for idx, row in df.iterrows():
+            labels = json.loads(row['labels'])
+            events = vocab.translate_sequence_token_to_events(labels)
+            sequence_events.extend(events)
+        
+        translate_events_to_sheet_music(sequence_events, output_dir=f"{song_name}")
+    
+def inference(init_bpm: int, inference_dir: str, new_song_name: str, saved_seq: bool, just_save_seq: bool = False):
+    new_song_path = os.path.join(inference_dir, new_song_name) # '/zhome/5d/a/168095/batchelor_amt/test_songs/river.mp3'
+    if not saved_seq:
+        
+        # TODO WARNING THIS IS NOT FLEXIBLE
+        with open("Transformer/configs/preprocess_config.yaml", 'r') as f:
+            preprocess_config = yaml.safe_load(f)
+        song = Song(new_song_path, preprocess_config)
+        spectrogram = song.compute_spectrogram()
+        
+        model = Transformer(config['n_mel_bins'], tgt_vocab_size, config['d_model'], config['num_heads'], config['num_layers'], config['d_ff'], config['max_seq_length'], config['dropout'], device)
+        # model.load_state_dict(torch.load(os.path.join(run_path, 'models', model_name), map_location=device))
+        model.to(device)
+        model.eval()
+
+        # Prepare the sequences
+        sequence_events = []
+        
+        # ----------------------------- Slice spectrogram dynamically ----------------------------- #
+        cur_bpm = init_bpm
+        cur_frame = 0
+        while cur_frame < spectrogram.shape[1]:
+            spec_slice, new_frame = song.preprocess_inference_new_song(spectrogram, cur_frame = cur_frame, bpm = cur_bpm)
+            spec_slice = spec_slice.T
+            spec_slice = spec_slice.to(device)
+            
+            cur_frame = new_frame
+            
+            # torch.tensor([[1]]) because SOS token is 1 
+            output = model.get_sequence_predictions(spec_slice.unsqueeze(0), torch.tensor([[1, cur_bpm]], device=device), config['max_seq_length'])
+            output = output.squeeze()
+            events = vocab.translate_sequence_token_to_events(output.tolist())
+            sequence_events.extend(events)
+            
+            if np.any(events > vocab.vocabulary['tempo'][1]):
+                cur_bpm = events[np.where(events > vocab.vocabulary['tempo'][1])[0][-1]]
+                
+        np.save(os.path.join(inference_dir, new_song_name), sequence_events)
+    
+    else:
+        sequence_events = np.load(os.path.join(inference_dir, new_song_name))
+        
+    if not just_save_seq:
+        translate_events_to_sheet_music(sequence_events, output_dir=f"{new_song_name}")
+        
+        
 def create_midi_from_model_events(events, bpm_tempo, output_dir='', onset_only=False):
     """Don't use onset_only, it's truly shit
     """
@@ -62,7 +141,6 @@ def create_midi_from_model_events(events, bpm_tempo, output_dir='', onset_only=F
     mid.save(os.path.join(output_dir,'river_pred.midi'))
     
 def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]],
-                                    bpm: int,
                                     output_dir = "/Users/helenakeitum/Desktop/output.xml"):
     """example: [('timeshift', 200), ('onset', 0), ('pitch', 60), ('offset', 100), ('pitch', 62), ('onset', 100)]
 
@@ -79,78 +157,76 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]],
     treble_staff.clef = clef.TrebleClef()
     bass_staff.clef = clef.BassClef()
     
-    # TODO: Hardcoded. Make it flexible
-    # TODO: Use the downbeat events to estimate the time signature
-    # treble_staff.timeSignature = meter.TimeSignature('4/4')
-    # bass_staff.timeSignature = meter.TimeSignature('4/4')
-    
     df = _prepare_data_frame(event_sequence)
+    df = df.sort_values(by=['onset'])
     print("Dataframe prepared!")
+    
+    # Calculate how long each measuer should be
+    measure_durations = np.diff(df[df['event'].isin(['SOS', 'Downbeat', 'EOS'])]['onset'])
     
     # Convert time to quarternote length
     df['duration'] = (df['offset'] - df['onset'])
-    last_recorded_downbeat = None
     beats_per_bar = 0
-    cur_bpm = 0
+    i = 0
+    beats_per_bar = 0
     for idx, row in df.iterrows():
         
-        if row['full_note'] == "Downbeat":
-            # Update the number of beats in a bar
-            if last_recorded_downbeat is not None:
+        if row['event'] in ['SOS', 'Downbeat']:
+            # TODO: Consider making Measures objects to correctly display pickups (measurenumber = 0)
+            # If a new time signature is detected
+            if beats_per_bar != measure_durations[i]:
+                beats_per_bar = measure_durations[i]
                 
-                # If a new time signature is detected
-                if beats_per_bar != (row['onset'] - last_recorded_downbeat):
-                    beats_per_bar = row['onset'] - last_recorded_downbeat
-                    
-                    multiplier = 1
-                    while (beats_per_bar * multiplier) % 1 != 0:
-                        multiplier += 1
-                    
-                    nominator = int(beats_per_bar * multiplier)
-                    denominator = 2**(multiplier + 1)
+                multiplier = 1
+                while (beats_per_bar * multiplier) % 1 != 0:
+                    multiplier += 1
                 
-                    treble_staff.insert(last_recorded_downbeat, meter.TimeSignature(f'{nominator}/{denominator}'))
-                    bass_staff.insert(last_recorded_downbeat, meter.TimeSignature(f'{nominator}/{denominator}'))
-
-            last_recorded_downbeat = row['onset']
+                nominator = int(beats_per_bar * multiplier)
+                denominator = 2**(multiplier + 1)
             
-            if row['bpm'] != cur_bpm:
-                # Add the metronome mark to the score
-                metronome_mark = tempo.MetronomeMark(number = row['bpm'])
-                treble_staff.insert(last_recorded_downbeat, metronome_mark)
-                bass_staff.insert(last_recorded_downbeat, metronome_mark)
-                
-                cur_bpm = row['bpm']
+                treble_staff.insert(row['onset'], meter.TimeSignature(f'{nominator}/{denominator}'))
+                bass_staff.insert(row['onset'], meter.TimeSignature(f'{nominator}/{denominator}'))
             
-            continue
-                
-        xml_note = note.Note(row['full_note'])
-        xml_note.duration = duration.Duration(row['duration'])
-        xml_note.offset = row['onset']
+            i += 1
+    
+        elif row['event'] == "Tempo":
+            metronome_mark = tempo.MetronomeMark(number = row['offset'])
+            metronome_mark.placement = 'above'
+            treble_staff.insert(row['onset'], metronome_mark)
+            
+        elif row['event'] == "EOS":
+            final_barline = bar.Barline('final')
+            treble_staff.append(final_barline)
+            bass_staff.append(final_barline)
         
-        if row['bpm'] != cur_bpm:
-            # Add the metronome mark to the score
-            metronome_mark = tempo.MetronomeMark(number = row['bpm'])
-            treble_staff.insert(xml_note.offset, metronome_mark)
-            bass_staff.insert(xml_note.offset, metronome_mark)
+        else:  
+            if len(row['event']) > 1:
+                xml_note = chord.Chord(row['event'])
+            else:      
+                xml_note = note.Note(row['event'][0])
             
-            cur_bpm = row['bpm']
-        
-        if row['duration'] == 0:
-            xml_note = xml_note.getGrace()
-        
-        # Evenly distribute between treble and bass cleff - could be optimized
-        # Depending on the predicted duration of the df, the insert method should act accordingly
-        staff = treble_staff if xml_note.octave >= 4 else bass_staff
-        ns = list(staff.getElementsByOffset(row['onset'], classList=[note.Note, chord.Chord]))
-        ds = [float(n.duration.quarterLength) for n in ns]
-        if ns and xml_note.duration.quarterLength in ds:
-            notes_to_chordify = np.where(np.isclose(ds, xml_note.duration.quarterLength))[0]
-            [staff.remove(ns[n]) for n in notes_to_chordify]
-            chord_to_insert = chord.Chord(list(ns[n] for n in notes_to_chordify) + [xml_note])
+            xml_note.duration = duration.Duration(row['duration'])
+            xml_note.offset = row['onset']
             
-            staff.insert(xml_note.offset, chord_to_insert)
-        else:
+            if row['duration'] == 0:
+                xml_note = xml_note.getGrace()
+            
+            # Evenly distribute between treble and bass cleff - could be optimized
+            if xml_note.isChord:
+                highest_note = xml_note.sortAscending().pitches[-1]
+                lowest_note = xml_note.sortAscending().pitches[0]
+                
+                # Decide which staff to insert the chord into based on the pitches of the highest and lowest notes
+                if highest_note.octave < 4:
+                    staff = bass_staff
+                elif lowest_note.octave >= 4:
+                    staff = treble_staff
+                else:
+                    staff = treble_staff # TODO: Split the chord into notes again
+            else:       
+                staff = treble_staff if xml_note.octave >= 4 else bass_staff
+            
+            # Insert into notes if the onset is already occupied
             staff.insert(xml_note.offset, xml_note)
     
     print("Done with adding to the streams. Now we make the score!") 
@@ -206,12 +282,13 @@ def _update_pitches(score, key_sig) -> stream.Score:
     return score
 
 def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
-    df = pd.DataFrame(columns=['full_note', 'onset', 'offset', 'bpm'])
+    df = pd.DataFrame(columns=['event', 'onset', 'offset'])
+    df = pd.concat([df, pd.DataFrame([{'event': "SOS", 'onset': 0, 'offset': 0}])], ignore_index=True)
     
     beat = 0
     eos_beats = 0
     last_downbeat_onset = 0
-    bpm = 0
+    cur_bpm = 0
     notes_to_concat: dict[str, list[int]] = {}
     et_switch = False
     onset_switch = False
@@ -225,11 +302,13 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
             et_switch = True
         
         if event == "tempo":
-            bpm = value
+            if value != cur_bpm:
+                df = pd.concat([df, pd.DataFrame([{'event': "Tempo", 'onset': beat, 'offset': value}])], ignore_index=True) # NOTE offset is the bpm
+                cur_bpm = value
         
         elif event == 'downbeat':
             last_downbeat_onset = beat
-            df = pd.concat([df, pd.DataFrame([{'full_note': "Downbeat", 'onset': last_downbeat_onset, 'offset': last_downbeat_onset, 'bpm': bpm}])], ignore_index=True)
+            df = pd.concat([df, pd.DataFrame([{'event': "Downbeat", 'onset': last_downbeat_onset, 'offset': last_downbeat_onset}])], ignore_index=True)
         
         elif event == "ET":
             et_switch = False
@@ -273,7 +352,12 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
                     # Remove from the dict and add to the dataframe
                     df_onset = notes_to_concat.pop(note_)[0]
                 
-                df = pd.concat([df, pd.DataFrame([{'full_note': note_, 'onset': df_onset, 'offset': beat, 'bpm': bpm}])], ignore_index=True)
+                # If note(s) with the same onset and offset exists in the dataframe, they are a chord - only notes are lists
+                pos_chord = df[(df['onset'] == df_onset) & (df['offset'] == beat) & (df['event'].apply(lambda x: isinstance(x, list)))]
+                if not pos_chord.empty:
+                    df.loc[pos_chord.index, 'event'] = pos_chord['event'].apply(lambda x: x + [note_]) # Add the note to the chord
+                else:
+                    df = pd.concat([df, pd.DataFrame([{'event': [note_], 'onset': df_onset, 'offset': beat}])], ignore_index=True)
         
         elif event == "beat":
             # Find indices of the tuplets
@@ -296,6 +380,9 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
                 new_beat = (value - decrement) * vocab_configs['subdivision']
             
             beat = new_beat + eos_beats
+    
+    # Add last downbeat to indicate end-of-score
+    df = pd.concat([df, pd.DataFrame([{'event': "EOS", 'onset': beat, 'offset': beat}])], ignore_index=True)
             
     return df
 
@@ -311,21 +398,21 @@ def _get_note_value(pitch):
     return (notes[pitch % 12], str(octaves[pitch // 12] - 1))
 
 if __name__ == '__main__':
+    # ----------------------------- For inference ----------------------------- #
     inference_dir = "inference_songs"
     new_song_name = "pirate_ensemble_105.mp3"
-    new_song_path = os.path.join(inference_dir, new_song_name) # '/zhome/5d/a/168095/batchelor_amt/test_songs/river.mp3'
-    test_new_song = False
     
-    # ----------------------------- Choose test song ----------------------------- #
-    song_name = "Pokemon_Ruby_Sapphire_Emerald_Ending_Credits_Theme" # 'MIDI-Unprocessed_24_R1_2006_01-05_ORIG_MID--AUDIO_24_R1_2006_01_Track01_wav'
-    data_dir = "preprocessed_data/21-05-24" # '/work3/s214629/preprocessed_data_best'
-    test_preprocessing_works = True
+    # ----------------------------- For preprocessing ----------------------------- #
+    data_dir = "preprocessed_data"
+    
     # ------------------------------- Choose model ------------------------------- #
-    
     run_path = "" # '/work3/s214629/run_a100_hope3/'
-    model_name = '07-05-24_musescore.pth'
+    model_name = '07-05-24_musescore.pth' 
     
     # --------------------------------- Run stuff -------------------------------- #
+    with open("Transformer/configs/preprocess_config.yaml", 'r') as f:
+        pre_configs = yaml.safe_load(f)
+    
     with open("Transformer/configs/train_config.yaml", 'r') as f:
         config = yaml.safe_load(f)
         
@@ -333,90 +420,14 @@ if __name__ == '__main__':
     with open("Transformer/configs/vocab_config.yaml", 'r') as f:
         vocab_configs = yaml.safe_load(f)
     vocab = Vocabulary(vocab_configs)
-    vocab.define_vocabulary()
+    vocab.define_vocabulary(pre_configs['max_beats'])
     tgt_vocab_size = vocab.vocab_size
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    saved = False
-    only_save = False
-    
-    if not saved:
-        if not test_new_song:
-            spectrogram = np.load(os.path.join(data_dir, 'spectrograms', f'{song_name}.npy'))
-            
-            for i in ['train', 'val', 'test']:              
-                df = pd.read_csv(os.path.join(data_dir, i, 'worker_0.csv'))
-                
-                if (df['song_name'] == song_name).any():
-                    break
-                
-            df = df[df['song_name'] == song_name] # get all segments of the song
 
-            sequences = []
-            for idx, row in df.iterrows():
-                sequence = spectrogram[:, int(row['sequence_start_idx']): int(row['sequence_end_idx'])]
-                sequence = sequence.T
-                sequence = torch.from_numpy(sequence)
-                sequences.append(sequence)
-            
-            spectrograms = pad_sequence(sequences, batch_first=True, padding_value=-1)
-            
-        else: 
-            # TODO WARNING THIS IS NOT FLEXIBLE
-            with open("Transformer/configs/preprocess_config.yaml", 'r') as f:
-                preprocess_config = yaml.safe_load(f)
-            song = Song(new_song_path,preprocess_config)
-            spectrograms = song.preprocess_inference_new_song()
-
-        spectrograms = spectrograms.to(device)
-        
-        if not test_preprocessing_works:
-            model = Transformer(config['n_mel_bins'], tgt_vocab_size, config['d_model'], config['num_heads'], config['num_layers'], config['d_ff'], config['max_seq_length'], config['dropout'], device)
-            model.load_state_dict(torch.load(os.path.join(run_path, 'models', model_name), map_location=device))
-            model.to(device)
-            model.eval()
-
-            # Prepare the sequences
-            all_sequence_events = []
-            # This might be dumb, Idk yet 
-            for sequence_spec in tqdm(spectrograms, total=len(spectrograms), desc='Generating predictions'):
-                # torch.tensor([[1]]) because SOS token is 1 
-                output = model.get_sequence_predictions(sequence_spec.unsqueeze(0), torch.tensor([[1]], device=device), config['max_seq_length'])
-                output = output.squeeze()
-                events = vocab.translate_sequence_token_to_events(output.tolist())
-                all_sequence_events.extend(events)
-            
-            np.save(os.path.join(inference_dir, new_song_name), all_sequence_events)
-        
-        elif not test_new_song:
-            # Create a midi based off of the ground truths
-            all_sequence_events = []
-            for idx, row in df.iterrows():
-                labels = json.loads(row['labels'])
-                events = vocab.translate_sequence_token_to_events(labels)
-                all_sequence_events.extend(events)
-        else:
-            raise ValueError('test_new_song and test_preprocessing_works cannot both be True.')
-            
-        # if not test_new_song:
-        #     for root, dirs, files in os.walk('/work3/s214629/maestro-v3.0.0/maestro-v3.0.0'):
-        #         if song_name + '.midi' in files:
-        #             bpm_tempo = MidiFile(os.path.join(root, song_name + '.midi')).tracks[0][0].tempo
-        #             break
+    new_song = True
+    init_bpm = 130
+    if new_song:
+        inference(init_bpm = init_bpm, inference_dir = inference_dir, new_song_name = new_song_name, saved_seq = False, just_save_seq = False)
     else:
-        all_sequence_events = np.load(os.path.join(inference_dir, new_song_name + '.npy'), allow_pickle=True)
-    
-    token_sequence = [1, 
-                      133, 108-12*4, 135, 
-                      132, 108-12*4, 137, 
-                      133, 22+12*2, 26+12*2, 170, 
-                      132, 22+12*2, 
-                      133, 37+12, 32+12, 175, 
-                      132, 26+12*2, 37+12, 32+12, 13+12*3, 
-                      2, 0]
-    # events = vocab.translate_sequence_token_to_events(token_sequence)
-    
-    if not only_save:
-        bpm_tempo = 100 # 65
-        translate_events_to_sheet_music(all_sequence_events, bpm = bpm_tempo, output_dir=f"{song_name}")
-    # create_midi_from_model_events(all_sequence_events, bpm_tempo, output_dir="/Users/helenakeitum/Desktop", onset_only=False)
+        test_preprocessing(data_dir)

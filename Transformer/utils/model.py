@@ -26,7 +26,8 @@ class Transformer(nn.Module):
         src_mask = torch.any((src != -1), axis=-1).unsqueeze(1).unsqueeze(2) # special mask for spectrogram
         tgt_mask = (tgt != 0).unsqueeze(1).unsqueeze(3) # batch_size x 1 x tgt_seq_length x 1
         seq_length = tgt.size(1)
-        nopeak_mask = (1 - torch.triu(torch.ones(1, seq_length, seq_length), diagonal=1)).bool()
+        nopeak_mask = torch.tril(torch.ones(1, seq_length, seq_length), diagonal=0).bool()
+        nopeak_mask[:, 0, 1] = True # SOS can also see the tempo
         tgt_mask = tgt_mask & nopeak_mask.to(self.device)
         return src_mask, tgt_mask
     
@@ -43,13 +44,10 @@ class Transformer(nn.Module):
         
     def forward(self, src, tgt, training=True):
         src_mask, tgt_mask = self.generate_mask(src, tgt)
-        if training:
-            src_embedded = self.dropout(self.positional_encoding(self.encoder_embedding(src)))
-            tgt_embedded = self.dropout(self.positional_encoding(self.decoder_embedding(tgt)))
-        else:
-            src_embedded = self.positional_encoding(self.encoder_embedding(src))
-            tgt_embedded = self.positional_encoding(self.decoder_embedding(tgt))
-            
+
+        src_embedded = self.dropout(self.positional_encoding(self.encoder_embedding(src)))
+        tgt_embedded = self.dropout(self.positional_encoding(self.decoder_embedding(tgt))) # (batch_size, t_seq_length, d_model)
+        
         enc_output = src_embedded
         for enc_layer in self.encoder_layers:
             enc_output = enc_layer(enc_output, src_mask)
@@ -202,10 +200,14 @@ if __name__ == "__main__":
     max_seq_length = 256 # doesn't really matter, can be set to whatever as long as its larger than the longest sequence - it's a pteprocess step for PE
     dropout = 0.1
 
+    with open('Transformer/configs/preprocess_config.yaml', 'r') as file:
+        p_config = yaml.safe_load(file)
+
     with open('Transformer/configs/vocab_config.yaml', 'r') as file:
         config = yaml.safe_load(file)
+        
     vocab = Vocabulary(config)
-    vocab.define_vocabulary()
+    vocab.define_vocabulary(p_config['max_beats'])
     
     tgt_vocab_size = vocab.vocab_size
     

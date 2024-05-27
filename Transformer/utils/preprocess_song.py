@@ -56,14 +56,24 @@ class Song:
         np.save(save_path, spectrogram)
         return spectrogram
         
-    def preprocess_inference_new_song(self, sequence_size=128) -> torch.Tensor:
-        spectrogram = self.compute_spectrogram()
-        spectrogram = spectrogram.T
-        spectrogram_slices = torch.from_numpy(spectrogram).split(128,0)
-
-        spectrogram_slices = pad_sequence(list(spectrogram_slices), batch_first=True, padding_value=-1)
+    def preprocess_inference_new_song(self, spectrogram, cur_frame: int, bpm: int = 120) -> torch.Tensor:
+        frame_times = librosa.frames_to_time(range(spectrogram.shape[1]), sr=self.config['sr'], hop_length=self.config['hop_length'], n_fft=self.config['n_fft'])
+        total_duration = frame_times[-1] - frame_times[cur_frame]
+        beats_left = total_duration * bpm / 60 # Assumes that the BPM is constant from here on out
         
-        return spectrogram_slices
+        min_size = self.config['min_beats']
+        max_size = self.config['max_beats'] if beats_left > self.config['max_beats'] else beats_left
+        
+        if max_size >= min_size:
+            beats_in_seq = np.random.randint(min_size, max_size + 1)
+        else:
+            beats_in_seq = max_size
+        
+        time_to_add = beats_in_seq * 60 / bpm
+        new_frame = cur_frame + np.argmin(np.abs(frame_times - time_to_add))
+        
+        spectrogram_slice = torch.from_numpy(spectrogram)[:, cur_frame:new_frame]
+        return spectrogram_slice, new_frame
         
     def compute_labels_and_segments(self) -> None:
         NotImplementedError("This method should be implemented in the subclass")
@@ -233,8 +243,7 @@ class MuseScore(Song):
         df = pd.DataFrame(columns=['pitch', 'onset', 'offset']) # xml_pitch, onset time and offset time in beats
         
         # ---------------------- Add tempo ---------------------- #
-        bpms_and_time_sig = self._merge_bpms_and_time_signatures()
-        for (start_beat, start_time), (end_beat, end_time), bpm, quarter_fraction in bpms_and_time_sig:
+        for (start_beat, end_beat, bpm) in self._get_tempos():
             df = pd.concat([df, pd.DataFrame([{'pitch': -bpm, 'onset': start_beat, 'offset': start_beat}])], ignore_index=True)
         
         # ---------------------- Add downbeats ---------------------- #
@@ -248,6 +257,8 @@ class MuseScore(Song):
                 
             downbeat = measure.offset
             df = pd.concat([df, pd.DataFrame([{'pitch': -1, 'onset': downbeat, 'offset': downbeat}])], ignore_index=True)
+        # Add the downbeat marking the end of the score
+        df = pd.concat([df, pd.DataFrame([{'pitch': -1, 'onset': self.score.highestTime, 'offset': self.score.highestTime}])], ignore_index=True)
         
         # ---------------------- Add notes and chords ---------------------- #  
         for element in self.score.flatten().notes:
@@ -300,66 +311,58 @@ class MuseScore(Song):
         
         return df
     
-    def compute_labels_and_segments(self, df, spectrogram, bars = 1, verbose = False):
+    def compute_labels_and_segments(self, df, spectrogram, verbose = False):
         
+        # ---------------------------- Calculate sequences --------------------------- #
+        
+        # Convert frame indices to time
+        frame_times = librosa.frames_to_time(range(spectrogram.shape[1]), sr=self.config['sr'], hop_length=self.config['hop_length'], n_fft=self.config['n_fft'])
+        
+        frame_beats = np.full_like(frame_times, fill_value = -1)
         # Calculate the onset time of all notes
         for (start_beat, start_time), (end_beat, end_time), bpm, quarter_fraction in self._merge_bpms_and_time_signatures():
             mask = (df['onset'] >= start_beat) & (df['onset'] < end_beat)
             df.loc[mask, 'onset_time'] = start_time + (df.loc[mask, 'onset'] - start_beat) * 60 / bpm
             
-        # Convert frame indices to time
-        frame_times = librosa.frames_to_time(range(spectrogram.shape[1]), sr=self.config['sr'], hop_length=self.config['hop_length'], n_fft=self.config['n_fft'])
+            # Calculate the beat of the spectrogram frames
+            mask = (frame_times >= start_time) & (frame_times < end_time)
+            frame_beats[mask] = start_beat + (frame_times[mask] - start_time) * bpm / 60
+            
+        df.loc[df.index[-1], 'onset_time'] = end_time
         
-        # Find sequence length of hyperparam "bars" in seconds according to the bpm and time signature
-        indices = [0]
-        compare_ind = [0]
-        sequence_beats = [0]
-        remainder = 0
-        downbeats = df[df['pitch'] == -1]
-        for i in range(bars, len(downbeats), bars):
-            frames = np.searchsorted(frame_times, np.asarray([downbeats.iloc[i]['onset_time']]))
-            indices.extend(frames)
-            
-            beats = [downbeats.iloc[i]['onset']]
-            sequence_beats.extend(beats)
-            
-            # # Adjust starting times and beats if the song has incomplete measures
-            # if start_time == 0 and self.pickup_measure:
-            #     # The first slice will include the pickup measure
-            #     start_beat = df[df['pitch'] == -1].iloc[0]['onset']
-            #     start_time = start_beat * 60 / bpm
-            # if end_beat == self.score.quarterLength and self.compensation_measure:
-            #     # The last slicings will omit the compensation measure
-            #     end_beat = df[df['pitch'] == -1].iloc[-1]['onset']
-            #     end_time = start_time + (end_beat - start_beat) * 60 / bpm
-            
-            # spec_time_duration = end_time - start_time
-            # beat_duration = end_beat - start_beat
-            # beats_per_bar = quarter_fraction * 4
-            # no_of_bars = beat_duration / beats_per_bar
-            # seconds_per_bar = spec_time_duration / no_of_bars
-            
-            # if np.isclose(remainder, np.round(remainder)):
-            #     remainder = np.round(remainder)
-            
-            # Find the frames that are closest to the start of each bar(s)
-            # NOTE: Former looks more correct when inspecting, but intuitively, the latter seems more correct
-            # frames = [np.min([np.searchsorted(frame_times, start_time + seconds_per_bar * n), spectrogram.shape[1] - 1]) for n in range(bars - int(remainder), int(no_of_bars) + 1, bars)]
-            # indices.extend(frames)
-            
-            # remainder -= int(remainder)
-            
-            # comp = [np.abs(frame_times - (start_time + seconds_per_bar * n)).argmin() for n in range(bars - int(remainder), int(no_of_bars) + 1, bars)]
-            # compare_ind.extend(comp)
-            
-            # # Make the slicing indices
-            # beats = [start_beat + beats_per_bar * n for n in range(bars - int(remainder), int(no_of_bars) + 1, bars)]
-            # sequence_beats.extend(beats)
-            
-            # # If the slice hyperparameter creates a remainder, we need to adjust the next slice
-            # remainder += (no_of_bars - (bars - int(remainder))) % bars 
-                
+        # NOTE: Review this perhaps?
+        if -1 in frame_beats:
+            frame_beats[frame_beats.tolist().index(-1)] = end_beat
+        
         assert df['onset_time'].isna().any() == False
+        
+        # Find random sequence length from min_bar to max_bar in seconds according to the bpm and time signature
+        indices = [0]
+        sequence_beats = [0]
+        
+        total_duration = self.score.highestTime
+        min_size = self.config['min_beats']
+        max_size = self.config['max_beats'] if total_duration > self.config['max_beats'] else int(total_duration)
+
+        # Initialize a list to store the chunk sizes
+        cur_beat = 0
+        while max_size >= min_size:
+            # Generate a random size between min_size and max_size
+            beats_in_seq = np.random.randint(min_size, max_size + 1)
+            
+            # Find the closest frame in the spectrogram and return its index
+            frame = np.argmin(np.abs(frame_beats - (cur_beat + beats_in_seq)))
+            
+            total_duration -= (frame_beats[frame] - cur_beat)
+            cur_beat = frame_beats[frame]
+            
+            # Gradually decrease the max_size to cut up as much as possible of the spectrogram
+            if total_duration < max_size:
+                max_size = int(total_duration)
+            
+            # Add the frame to the indices
+            indices.extend([frame])
+            sequence_beats.extend([np.round(cur_beat)]) # NOTE: This will give a little round-off error as opposed to looking up the frame_beat. However, it's necessary to preserve the grid-structure
         
         if verbose:
             # Plot the spectrogram along with the beats and cuts
@@ -374,12 +377,22 @@ class MuseScore(Song):
         sequence_beats = list(zip(sequence_beats[:-1], sequence_beats[1:]))
         
         sequence_labels = []
+        cur_bpm = -df.iloc[0]['pitch']
         for start_beat, end_beat in sequence_beats:
             sequence_label = df[(df['onset'] >= start_beat) & (df['onset'] < end_beat)]
+            
+            # Start any sequence with declaring which tempo is used
+            if cur_bpm != -sequence_label.iloc[0]['pitch']:
+                sequence_label = pd.concat([pd.DataFrame([{'pitch': -cur_bpm, 'onset': Fraction(start_beat), 'offset': Fraction(start_beat)}]), sequence_label], ignore_index=True)
             
             # IMPORTANT: Shift the sequence times
             sequence_label.onset = sequence_label.onset - Fraction(start_beat)
             sequence_label.offset = sequence_label.offset - Fraction(start_beat)
+            
+            # Find whether any tempo changes occur in this sequence
+            tempos = sequence_label[sequence_label['pitch'] < -1]
+            if not tempos.empty:
+                cur_bpm = -tempos.iloc[-1]['pitch']
             
             sequence_labels.append(sequence_label)
             
@@ -388,7 +401,7 @@ class MuseScore(Song):
             vocab_configs = yaml.safe_load(f)
         vocab = Vocabulary(vocab_configs)
 
-        vocab.define_vocabulary(self.config['h_bars'])
+        vocab.define_vocabulary(self.config['max_beats'])
         sequence_tokens = []
         df_tie_notes = None
         for (start_beat, end_beat), sequence_label in zip(sequence_beats, sequence_labels):
@@ -402,7 +415,7 @@ class MuseScore(Song):
         
         return df
 
-    def _merge_bpms_and_time_signatures(self):
+    def _get_tempos(self):
         # Extract tempo(s) from the score
         mm_marks = self.score.metronomeMarkBoundaries()
         
@@ -425,7 +438,10 @@ class MuseScore(Song):
         bpms = list(zip(bpms_offsets[:-1], bpms_offsets[1:], bpms))
         bpms = np.asarray(bpms)
         
-        # Do the same with the time signatures
+        return bpms
+    
+    def _get_time_signatures(self):
+        # Extract time signature(s) from the score
         time_signatures = self.score.getTimeSignatures()
         t_offsets, t_ratios = [], []
         for i, ts in enumerate(time_signatures):
@@ -444,6 +460,13 @@ class MuseScore(Song):
         
         time_signature_offsets_and_ratios = list(zip(t_offsets[:-1], t_offsets[1:], t_ratios))
         time_signature_offsets_and_ratios = np.asarray(time_signature_offsets_and_ratios)
+        
+        return time_signature_offsets_and_ratios
+
+    def _merge_bpms_and_time_signatures(self):
+        
+        bpms = self._get_tempos()
+        time_signature_offsets_and_ratios = self._get_time_signatures()
         
         # Initialize an empty list to store the merged BPMs and time signatures
         merged = []
