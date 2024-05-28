@@ -1,0 +1,10 @@
+run_folder_paths: # In case training of one model spans multiple runs. Put the folders in order!!
+  - /work3/s214629/run_a100_hope3
+  - /work3/s214629/run_a100_hope3_cont_smallest_lr
+  - /work3/s214629/run_a100_hope3_cont_cont_00001
+
+# Ideally would be the same as the last run folder path
+output_dir: /work3/s214629/run_a100_hope3_cont_cont_00001 
+
+# We could add a merge runs option here
+
