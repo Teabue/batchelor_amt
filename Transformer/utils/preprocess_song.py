@@ -25,7 +25,7 @@ class Song:
         os.makedirs(os.path.join(self.config['output_dir'], 'spectrograms'), exist_ok=True)
     
     
-    def compute_spectrogram(self) -> np.ndarray:
+    def compute_spectrogram(self, save_path = None) -> np.ndarray:
         """Computes a ndarray representation of the spectrogram of the song and saves it as npy file.
 
         Raises:
@@ -36,7 +36,8 @@ class Song:
         """
         x, sr = librosa.load(self.song_path, sr=self.config['sr'])
         
-        save_path = os.path.join(self.config['output_dir'], 'spectrograms', f'{self.song_name}.npy')
+        if save_path is None:
+            save_path = os.path.join(self.config['output_dir'], 'spectrograms', f'{self.song_name}.npy')
         
         if self.config['preprocess_method'] == 'cqt':
             cqt = librosa.cqt(y=x, sr=sr, hop_length=self.config['hop_length'], n_bins=self.config['n_bins'])
@@ -228,6 +229,7 @@ class MuseScore(Song):
         #     raise FileNotFoundError(f"No midi found with extensions {self.config['midi_file_extensions']} for song {self.song_name}")
         
         try:
+            self.score = self.score.makeRests(timeRangeFromBarDuration=True) # Some scores have missing rests and that will completely mess up the expansion
             self.score = self.score.expandRepeats()
             self.expansion_succes = True
             self.pickup_measure = False
