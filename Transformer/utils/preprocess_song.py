@@ -281,6 +281,7 @@ class MuseScore(Song):
                 
                 # Check if any of the note(s) in the next element matches any pitches with the start tied element 
                 # as well as if the next element contains a stop tie. This will determine when we terminate
+                # WHIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII
                 overlapping_pitches = np.any([[m1 == m2 and (t2 is not None and t2.type == "stop") for (m1, t1) in ele_notes] for (m2, t2) in midi_and_ties], axis = 0)
                 
                 # Keep going forward in the score until we encounter a stop tie with the same pitch as the start tied element
@@ -347,9 +348,10 @@ class MuseScore(Song):
         total_duration = self.total_duration
         min_size = self.config['min_beats']
         max_size = self.config['max_beats'] if total_duration > self.config['max_beats'] else int(total_duration)
-
+        # WHIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII
         # Initialize a list to store the chunk sizes
         cur_beat = 0
+        prev_beat = None
         while max_size >= min_size:
             # Generate a random size between min_size and max_size
             beats_in_seq = np.random.randint(min_size, max_size + 1)
@@ -366,8 +368,12 @@ class MuseScore(Song):
             
             # Add the frame to the indices
             indices.extend([frame])
+            if cur_beat == prev_beat:
+                raise ValueError(f"Something is wrong with the XML song so that sequnce_beats would get repeated beats looping into infinity and beyond.")
+            
             sequence_beats.extend([np.round(cur_beat)]) # NOTE: This will give a little round-off error as opposed to looking up the frame_beat. However, it's necessary to preserve the grid-structure
-        
+            prev_beat = cur_beat
+            
         if verbose:
             # Plot the spectrogram along with the beats and cuts
             import matplotlib.pyplot as plt

@@ -1,6 +1,7 @@
 import multiprocessing
 import os 
 import pandas as pd
+import logging
 pd.options.mode.chained_assignment = None  # default='warn'
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
@@ -10,11 +11,13 @@ from utils.preprocess_song import Maestro, MuseScore
 """
 All of this is done on the cpu :^D
 """
+
 #TODO: Bug where header does not appear, oops (easy fikx I'm just too lazy atm)
 
 class DataPreprocessor:
-    def __init__(self, preprocess_config) -> None:
+    def __init__(self, preprocess_config, logger=None) -> None:
         self.config = preprocess_config
+        self.logger = logger
     
     def _prepreprocess_song(self, worker_nr: int, songs: list[str,str]) -> None:
         # TODO: Make this flexible for other datasets
@@ -23,7 +26,12 @@ class DataPreprocessor:
             if self.config["dataset"] == "Maestro":
                 song = Maestro(song_path, self.config)
             elif self.config["dataset"] == "MuseScore":
-                song = MuseScore(song_path, self.config)
+                try:
+                    song = MuseScore(song_path, self.config)
+                except Exception as e:
+                    if self.logger != None:
+                        self.logger.error(f"Error in {song_path}: {e}")
+                    continue
             else:
                 raise ValueError("Invalid dataset")
             
@@ -98,6 +106,7 @@ if __name__ == '__main__':
     """ Run the file from the repo root folder"""
     import yaml
     import shutil 
+    
     # Load the YAML file
     with open('Transformer/configs/preprocess_config.yaml', 'r') as f:
         configs = yaml.safe_load(f)
@@ -125,6 +134,12 @@ if __name__ == '__main__':
         yaml.dump(vocab_configs, file)
     # ------------------------------------- w ------------------------------------ #
     
-    preprocessor = DataPreprocessor(configs)
+    # Initialize the song logger - this will log every song that throws an error in the preprocessing
+    logger = logging.getLogger(__name__)
+    logging.basicConfig(filename = os.path.join(configs['output_dir'],'song_preprocess.log'), encoding='utf-8', level=logging.ERROR)
+    
+    
+    # Run the preprocessor
+    preprocessor = DataPreprocessor(configs, logger)
     
     preprocessor.preprocess()
