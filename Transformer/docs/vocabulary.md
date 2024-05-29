@@ -10,9 +10,10 @@ The [vocabulary config file](/Transformer/configs/vocab_config.yaml) defines all
 |                    | EOS                 | End-of-sequence token                                                                                                                                                                                                                           |
 |                    | ET                  | It can happen that note onsets will be cut off in the slicing process. These notes should therefore not be marked with an onset in the beginning of the sequence but instead be labelled as a note that is a continuation of a previous segment |
 |                    | downbeat            | Marks whenever the first beat of a bar is present                                                                                                                                                                                               |
-| **Event types**    | pitch               | Tokens corresponding to the midi pitch numbering system. Note that -1 is a helper token designed to mark downbeats and does not constitute a pitch                                                                                              |
-|                    | onset\_offset       | A switch-like token where 1 corresponds to the onsetting of subsequent notes and 0 corresponds to offsetting                                                                                                                                    |
-|                    | beat                | The chronological order of notes for a specified subdivision of notes and tuplets for four bars. Currently uses 32nd notes and 16th tuplets                                                                                                     |
+| **Event types**    | pitch               | Tokens corresponding to the midi pitch numbering system.                                                                                               |
+|                    | onset\_offset       | A token where 1 corresponds to the onsetting of subsequent notes and 0 corresponds to offsetting                                                                                                                                    |
+|                    | beat                | The chronological order of notes for a specified subdivision of notes and tuplets. Currently uses 32nd notes and 16th tuplets. The value range will be dynamically adjusted according to the min\_beats and max\_beats set in [the preprocessing config file](/Transformer/configs/preprocess_config.yaml)                                                                                                     |
+|                    | tempo       | Declares the bpm in quarter notes                                                                                                                                    |
 | **Miscellaneous**  | subdivision         | The fraction of a quarter note corresponding to the shortest subdivision of the notes. Currently 32nd notes                                                                                                                                     |
 |                    | tuplet\_subdivision | Expresses the fraction of a quarternote corresponding to the minimum subdivision of tuplets. Note that it is given as a string but is converted to a Fraction class object in the code to avoid floating points and rounding errors             |
 
@@ -58,21 +59,30 @@ _Special characters:_
 ## Rules:
 
 The hierarchy of tokens is given as:
+
+**Initial declarations:**
 1. SOS
-2. pitches of ET notes (if any)
-3. ET (if any)
-4. beat
-5. downbeat
-6. offset
-7. onset
-8. pitch
-9. EOS
-10. PAD
+2. tempo
+3. pitches of ET notes (if any)
+4. ET (if any)
 
-Do note that if pitches are being offset, those pitch tokens will be appended to the sequence before a possible onset token. The hierarchy is simply to express that the onset\_offset switch will be declared before any pitches.
+**Ongoing declarations:**
 
-- When doing pitches, always order them by pitch value from lowest first to highest last (the helper downbeat pitch -1 will be removed from the ordering)
-- If there are both onsets and offsets for one time shift, we always offset before we onset
+5. beat
+6. tempo
+7. downbeat
+8. offset
+9.  onset
+10. pitch
+
+**Termination declarations:**
+11. EOS
+12. PAD
+
+Do note that if pitches are being offset, those pitch tokens will be appended to the sequence before a possible onset token. 
+
+- When declaring pitches, always order them by pitch value from lowest first to highest last
+- If there are both onsets and offsets at a beat, we always offset before we onset
 - Always declare already playing pitches first followed by an ET token
 - A sequence will be beat shifted to its end duration if there are no notes that are played or if the notes do not play the entire sequence duration
 
