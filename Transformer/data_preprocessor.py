@@ -26,12 +26,7 @@ class DataPreprocessor:
             if self.config["dataset"] == "Maestro":
                 song = Maestro(song_path, self.config)
             elif self.config["dataset"] == "MuseScore":
-                try:
-                    song = MuseScore(song_path, self.config)
-                except Exception as e:
-                    if self.logger != None:
-                        self.logger.error(f"Error in {song_path}: {e}")
-                    continue
+                song = MuseScore(song_path, self.config)
             else:
                 raise ValueError("Invalid dataset")
             
@@ -39,7 +34,13 @@ class DataPreprocessor:
             if song.expansion_succes is False:
                 continue
             
-            df_song = song.preprocess(verbose = False)
+            # Preprocess the song and log it if the song failed to preprocess
+            try:
+                df_song = song.preprocess(verbose = False)
+            except Exception as e:
+                if self.logger != None:
+                    self.logger.error(f"Error in {song_path}: {e}")
+                continue
             
             save_path = os.path.join(self.config['output_dir'], split, f'worker_{worker_nr}.csv')
             if not os.path.exists(save_path):
