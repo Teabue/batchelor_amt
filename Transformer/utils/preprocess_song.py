@@ -9,6 +9,7 @@ import torch
 from fractions import Fraction
 from music21 import *
 from utils.vocabularies import Vocabulary
+from .song_check import fermata_check
 from torch.nn.utils.rnn import pad_sequence
 
 class Song:
@@ -231,6 +232,7 @@ class MuseScore(Song):
         try:
             self.score = self.score.makeRests(timeRangeFromBarDuration=True) # Some scores have missing rests and that will completely mess up the expansion
             self.score = self.score.expandRepeats()
+            contains_fermata, self.total_duration = fermata_check(self.score)
             self.expansion_succes = True
             self.pickup_measure = False
             self.compensation_measure = False
@@ -342,7 +344,7 @@ class MuseScore(Song):
         indices = [0]
         sequence_beats = [0]
         
-        total_duration = self.score.highestTime
+        total_duration = self.total_duration
         min_size = self.config['min_beats']
         max_size = self.config['max_beats'] if total_duration > self.config['max_beats'] else int(total_duration)
 
