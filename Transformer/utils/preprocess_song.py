@@ -69,7 +69,8 @@ class Song:
         if max_size >= min_size:
             beats_in_seq = np.random.randint(min_size, max_size + 1)
         else:
-            beats_in_seq = max_size
+            new_frame = spectrogram.shape[1]
+            return torch.from_numpy(spectrogram)[:, cur_frame:]
         
         time_to_add = beats_in_seq * 60 / bpm
         new_frame = cur_frame + np.argmin(np.abs(frame_times - time_to_add))
@@ -232,7 +233,7 @@ class MuseScore(Song):
         try:
             self.score = self.score.makeRests(timeRangeFromBarDuration=True) # Some scores have missing rests and that will completely mess up the expansion
             self.score = self.score.expandRepeats()
-            contains_fermata, self.total_duration = fermata_check(self.score)
+            self.contains_fermata, self.total_duration = fermata_check(self.score)
             self.expansion_succes = True
             self.pickup_measure = False
             self.compensation_measure = False
@@ -281,11 +282,15 @@ class MuseScore(Song):
                 
                 # Check if any of the note(s) in the next element matches any pitches with the start tied element 
                 # as well as if the next element contains a stop tie. This will determine when we terminate
-                # WHIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII
+                pitches_matched = np.array([False if (t is not None and t.type == "start") else True for (_, t) in ele_notes])
                 overlapping_pitches = np.any([[m1 == m2 and (t2 is not None and t2.type == "stop") for (m1, t1) in ele_notes] for (m2, t2) in midi_and_ties], axis = 0)
                 
+                # Update the duration of the found tied notes
+                duration[overlapping_pitches] = duration[overlapping_pitches] + Fraction(tied_note.quarterLength)
+                pitches_matched[overlapping_pitches] = True
+                
                 # Keep going forward in the score until we encounter a stop tie with the same pitch as the start tied element
-                while not np.any(overlapping_pitches):
+                while not np.all(pitches_matched):
                     if isinstance(tied_note, note.Note):
                         next_note = tied_note.next('Note')
                         next_note_offset = next_note.offset if next_note is not None else np.inf # We reached the end of the score
@@ -300,10 +305,14 @@ class MuseScore(Song):
                         raise AttributeError(f'Song {self.song_name} has a something wrong woth tie notes, getting None. Measure_number: {element.measureNumber}')
                     overlapping_pitches = np.any([[m1 == m2 and (t2 is not None and t2.type == "stop") for (m1, t1) in ele_notes] for (m2, t2) in midi_and_ties], axis = 0)
                     
-                    # If it is a continuing tie, we need to update the duration of the pitches that are tied
-                    if np.any(overlapping_pitches) and (tied_note.tie is not None and tied_note.tie.type == "continue"):
-                        duration[overlapping_pitches] = duration[overlapping_pitches] + Fraction(tied_note.quarterLength)
-                duration[overlapping_pitches] = duration[overlapping_pitches] + Fraction(tied_note.quarterLength) # NOTE: Could this be mess things up somehow?
+                    # Update the duration of the found tied notes
+                    duration[overlapping_pitches] = duration[overlapping_pitches] + Fraction(tied_note.quarterLength)
+                    pitches_matched[overlapping_pitches] = True
+                    
+                    # Look for continuing ties and update the duration
+                    continuing_pitches = np.any([[m1 == m2 and (t2 is not None and t2.type == "continue") for (m1, t1) in ele_notes] for (m2, t2) in midi_and_ties], axis = 0)
+                    if np.any(continuing_pitches):
+                        duration[continuing_pitches] = duration[continuing_pitches] + Fraction(tied_note.quarterLength)
             
             for i, p in enumerate(element.pitches):
                 # Don't add the note if it is a tie
@@ -375,12 +384,17 @@ class MuseScore(Song):
             prev_beat = cur_beat
             
         if verbose:
+                
             # Plot the spectrogram along with the beats and cuts
             import matplotlib.pyplot as plt
             plt.figure(figsize=(10, 5))
+            plt.title(f'{self.song_name}')
             plt.imshow(spectrogram, aspect='auto', origin='lower')
             for idx in indices:
                 plt.axvline(idx, color='r', linewidth=1)
+            if self.contains_fermata:
+                fermata = np.argmin(np.abs(frame_beats - self.total_duration))
+                plt.axvline(fermata, color='y', linewidth=1)
             plt.show()
         
         # ---------------------- Extract the sequences using onset ---------------------- #
