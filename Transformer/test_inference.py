@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 import torch
 import os
@@ -5,6 +6,7 @@ import pandas as pd
 import yaml
 from tqdm import tqdm
 import json
+import xml.etree.ElementTree as ET
 
 from fractions import Fraction
 from mido import Message, MetaMessage, MidiFile, MidiTrack, bpm2tempo, second2tick
@@ -15,28 +17,294 @@ from utils.vocabularies import Vocabulary
 from utils.preprocess_song import Song
 from utils.model import Transformer
 
+def HelenaMakeMeasures(
+    s: stream.Stream,
+    *,
+    meterStream=None,
+    refStreamOrTimeRange=None,
+    searchContext=False,
+    innerBarline=None,
+    finalBarline='final',
+    bestClef=False,
+    inPlace=False,
+):
+    
+    mStart = None
+
+    # must take a flat representation, as we need to be able to
+    # position components, and sub-streams might hide elements that
+    # should be contained
+
+    if s.hasPartLikeStreams():
+        # can't flatten, because it would destroy parts
+        if inPlace:
+            returnObj = s
+        else:
+            returnObj = copy.deepcopy(s)
+        for substream in returnObj.getElementsByClass('Stream'):
+            HelenaMakeMeasures(substream, meterStream=meterStream,
+                                   refStreamOrTimeRange=refStreamOrTimeRange,
+                                   searchContext=searchContext,
+                                   innerBarline=innerBarline,
+                                   finalBarline=finalBarline,
+                                   bestClef=bestClef,
+                                   inPlace=True,  # copy already made
+                                   )
+        if inPlace:
+            return None
+        else:
+            return returnObj
+    else:
+        if s.hasVoices():
+            # cannot make flat if there are voices, as would destroy stream partitions
+            # parts containing voices are less likely to occur since MIDI parsing changes in v7
+            srcObj = s
+        else:
+            srcObj = s.flatten()
+        if not srcObj.isSorted:
+            srcObj = srcObj.sorted()
+        if not inPlace:
+            srcObj = copy.deepcopy(srcObj) # NOTE: copy.deepcopy will reset the barduration attribute
+        voiceCount = len(srcObj.voices)
+
+    # may need to look in activeSite if no time signatures are found
+    if meterStream is None:
+        # get from this Stream, or search the contexts
+        meterStream = srcObj.getTimeSignatures(
+            returnDefault=True,
+            searchContext=False,
+            sortByCreationTime=False
+        )
+
+    elif isinstance(meterStream, meter.TimeSignature):
+        # if meterStream is a TimeSignature, use it
+        ts = meterStream
+        meterStream = stream.Stream()
+        meterStream.insert(0, ts)
+    else:  # check that the meterStream is a Stream!
+        if not isinstance(meterStream, stream.Stream):
+            raise stream.StreamException(
+                'meterStream is neither a Stream nor a TimeSignature!')
+
+    # need a SpannerBundle to store any found spanners and place
+    # at the part level
+    spannerBundleAccum = spanner.SpannerBundle()
+
+    clefObj = srcObj.clef or srcObj.getContextByClass(clef.Clef)
+    if clefObj is None:
+        clefObj = srcObj.getElementsByClass(clef.Clef).getElementsByOffset(0).first()
+        # only return clefs that have offset = 0.0
+        if not clefObj:
+            clefObj = clef.bestClef(srcObj, recurse=True)
+
+    # for each element in stream, need to find max and min offset
+    # assume that flat/sorted options will be set before processing
+    # list of start, start+dur, element
+    offsetMapList = srcObj.offsetMap()
+    if offsetMapList:
+        oMax = max([x.endTime for x in offsetMapList])
+    else:
+        oMax = 0
+
+    # if a ref stream is provided, get the highest time from there
+    # only if it is greater than the highest time yet encountered
+    if refStreamOrTimeRange is not None:
+        if isinstance(refStreamOrTimeRange, stream.Stream):
+            refStreamHighestTime = refStreamOrTimeRange.highestTime
+        else:  # assume it's a list
+            refStreamHighestTime = max(refStreamOrTimeRange)
+        if refStreamHighestTime > oMax:
+            oMax = refStreamHighestTime
+
+    # create a stream of measures to contain the offsets range defined
+    # create as many measures as needed to fit in oMax
+    post = s.__class__()
+    post.derivation.origin = s
+    post.derivation.method = 'makeMeasures'
+
+    o = 0.0  # initial position of first measure is assumed to be zero
+    measureCount = 0
+    lastTimeSignature = None
+    while True:
+        # TODO: avoid while True
+        m = stream.Measure()
+        m.number = measureCount + 1
+        thisTimeSignature = meterStream.getElementAtOrBefore(o)
+        
+        if thisTimeSignature is None and lastTimeSignature is None:
+            raise stream.StreamException(
+                'failed to find TimeSignature in meterStream; '
+                + 'cannot process Measures')
+        if (thisTimeSignature is not lastTimeSignature
+                and thisTimeSignature is not None):
+            lastTimeSignature = thisTimeSignature
+            m.timeSignature = thisTimeSignature # NOTE: Before it was deepcopied. That would reset the barDuration attribute
+            
+        # only add a clef for the first measure when automatically
+        # creating Measures; this clef is from getClefs, called above
+        if measureCount == 0:
+            m.clef = clefObj
+            if voiceCount > 0 and s.keySignature is not None:
+                m.insert(0, copy.deepcopy(s.keySignature))
+            
+        # add voices if necessary (voiceCount > 0)
+        for voiceIndex in range(voiceCount):
+            v = stream.Voice()
+            v.id = voiceIndex  # id is voice index, starting at 0
+            m.coreInsert(0, v)
+        if voiceCount:
+            m.coreElementsChanged()
+
+        # avoid an infinite loop
+        if thisTimeSignature.barDuration.quarterLength == 0:
+            raise stream.StreamException(
+                f'time signature {thisTimeSignature!r} has no duration')
+        post.coreInsert(o, m)  # insert measure
+        # increment by meter length
+        o += thisTimeSignature.barDuration.quarterLength
+        if o >= oMax:  # may be zero
+            break  # if length of this measure exceeds last offset
+        else:
+            measureCount += 1
+
+    post.coreElementsChanged()
+
+    # cache information about each measure (we used to do this once per element)
+    postLen = len(post)
+    postMeasureList = []
+    lastTimeSignature = meter.TimeSignature('4/4')  # default.
+
+    for i in range(postLen):
+        m = post[i]
+        if m.timeSignature is not None:
+            lastTimeSignature = m.timeSignature
+        # get start and end offsets for each measure
+        # seems like should be able to use m.duration.quarterLengths
+        mStart = post.elementOffset(m)
+        mEnd = mStart + lastTimeSignature.barDuration.quarterLength
+        # if elements start fits within this measure, break and use
+        # offset cannot start on end
+        postMeasureList.append({'measure': m,
+                                'mStart': mStart,
+                                'mEnd': mEnd})
+
+    # populate measures with elements
+    for oneOffsetMap in offsetMapList:
+        e, start, end, voiceIndex = oneOffsetMap
+
+        # environLocal.printDebug(['makeMeasures()', start, end, e, voiceIndex])
+        # iterate through all measures, finding a measure that
+        # can contain this element
+
+        # collect all spanners and move to outer Stream
+        if isinstance(e, spanner.Spanner):
+            spannerBundleAccum.append(e)
+            continue
+
+        match = False
+
+        for i in range(postLen):
+            postMeasureInfo = postMeasureList[i]
+            mStart = postMeasureInfo['mStart']
+            mEnd = postMeasureInfo['mEnd']
+            m = postMeasureInfo['measure']
+
+            if mStart <= start < mEnd:
+                match = True
+                break
+
+        if not match:
+            if start == end == oMax:
+                post.storeAtEnd(e)
+                continue
+            else:
+                raise stream.StreamException(
+                    f'cannot place element {e} with start/end {start}/{end} within any measures')
+
+        # find offset in the temporal context of this measure
+        # i is the index of the measure that this element starts at
+        # mStart, mEnd are correct
+        oNew = start - mStart  # remove measure offset from element offset
+
+        # insert element at this offset in the measure
+        # not copying elements here!
+
+        # in the case of a Clef, and possibly other measure attributes,
+        # the element may have already been placed in this measure
+        # we need to only exclude elements that are placed in the special
+        # first position
+        if m.clef is e:
+            continue
+        # do not accept another time signature at the zero position: this
+        # is handled above
+        if oNew == 0 and isinstance(e, meter.TimeSignature):
+            continue
+
+        # NOTE: cannot use coreInsert here for some reason
+        if voiceIndex is None:
+            m.insert(oNew, e)
+        else:  # insert into voice specified by the voice index
+            m.voices[voiceIndex].insert(oNew, e)
+
+    # add found spanners to higher-level; could insert at zero
+    for sp in spannerBundleAccum:
+        post.append(sp)
+
+    # clean up temporary streams to avoid extra site accumulation
+    del srcObj
+
+    # set barlines if necessary
+    lastIndex = len(post.getElementsByClass(stream.Measure)) - 1
+    for i, m in enumerate(post.getElementsByClass(stream.Measure)):
+        if i != lastIndex:
+            if innerBarline not in ['regular', None]:
+                m.rightBarline = innerBarline
+        else:
+            if finalBarline not in ['regular', None]:
+                m.rightBarline = finalBarline
+        if bestClef:
+            m.clef = clef.bestClef(m, recurse=True)
+
+    if not inPlace:
+        post.setDerivationMethod('makeMeasures', recurse=True)
+        return post  # returns a new stream populated w/ new measure streams
+    else:  # clear the stored elements list of this Stream and repopulate
+        # with Measures created above
+        s._elements = []
+        s._endElements = []
+        s.coreElementsChanged()
+        if post.isSorted:
+            postSorted = post
+        else:
+            postSorted = post.sorted()
+
+        for e in postSorted:
+            # may need to handle spanners; already have s as site
+            s.insert(post.elementOffset(e), e)
+
 def test_preprocessing(data_dir: str):
     songs_dir = os.path.join(data_dir, "spectrograms")
     songs = [os.path.splitext(file)[0] for file in os.listdir(songs_dir)]
     
     for song_name in songs:
-        for i in ['train', 'val', 'test']:              
-            df = pd.read_csv(os.path.join(data_dir, i, 'labels.csv'))
+        if not os.path.exists(f'{song_name}.mxl'):
+            for i in ['train', 'val', 'test']:              
+                df = pd.read_csv(os.path.join(data_dir, i, 'labels.csv'))
+                
+                if (df['song_name'] == song_name).any():
+                    break
+                
+            df = df[df['song_name'] == song_name] # get all segments of the song
             
-            if (df['song_name'] == song_name).any():
-                break
+            # Create a sheet based off of the ground truths
+            sequence_events = []
+            for idx, row in df.iterrows():
+                labels = json.loads(row['labels'])
+                events = vocab.translate_sequence_token_to_events(labels)
+                sequence_events.extend(events)
             
-        df = df[df['song_name'] == song_name] # get all segments of the song
+            translate_events_to_sheet_music(sequence_events, output_dir=f"{song_name}")
         
-        # Create a sheet based off of the ground truths
-        sequence_events = []
-        for idx, row in df.iterrows():
-            labels = json.loads(row['labels'])
-            events = vocab.translate_sequence_token_to_events(labels)
-            sequence_events.extend(events)
-        
-        translate_events_to_sheet_music(sequence_events, output_dir=f"{song_name}")
-    
 def inference(init_bpm: int, inference_dir: str, new_song: str, model_name: str, saved_seq: bool, just_save_seq: bool = False):
     os.makedirs(os.path.join(inference_dir, "spectrograms"), exist_ok=True)
         
@@ -67,15 +335,16 @@ def inference(init_bpm: int, inference_dir: str, new_song: str, model_name: str,
             spec_slice = spec_slice.to(device)
             
             cur_frame = new_frame
+            token_bpm = vocab.vocabulary['tempo'][0].translate_value_to_token(cur_bpm)
             
             # torch.tensor([[1]]) because SOS token is 1 
-            output = model.get_sequence_predictions(spec_slice.unsqueeze(0), torch.tensor([[1, cur_bpm]], device=device), config['max_seq_length'])
+            output = model.get_sequence_predictions(spec_slice.unsqueeze(0), torch.tensor([[1, token_bpm]], device=device), config['max_seq_length'])
             output = output.squeeze()
             events = vocab.translate_sequence_token_to_events(output.tolist())
             sequence_events.extend(events)
             
-            if np.any(events > vocab.vocabulary['tempo'][1]):
-                cur_bpm = events[np.where(events > vocab.vocabulary['tempo'][1])[0][-1]]
+            if np.any([event[0] == "tempo" for event in events[2:]]):
+                cur_bpm = events[np.where([event[0] == "tempo" for event in events])[0][-1]][1]
         
         os.makedirs(os.path.join(inference_dir, 'seq_predictions'), exist_ok=True)        
         np.save(os.path.join(inference_dir, 'seq_predictions', new_song_name), sequence_events)
@@ -221,34 +490,35 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]],
         pd.DataFrame: _description_
     """
     
-    treble_staff = stream.PartStaff()
-    bass_staff = stream.PartStaff()
+    treble_staff = stream.PartStaff(id="TrebleStaff")
+    bass_staff = stream.PartStaff(id="BassStaff")
     
     treble_staff.clef = clef.TrebleClef()
     bass_staff.clef = clef.BassClef()
     
     df = _prepare_data_frame(event_sequence)
-    df = df.sort_values(by=['onset'])
     print("Dataframe prepared!")
     
     # Calculate how long each measure should be
     measure_durations = np.diff(df[df['event'].isin(['SOS', 'Downbeat', 'EOS'])]['onset'])
-    
+
     # Convert time to quarternote length
     df['duration'] = (df['offset'] - df['onset'])
     beats_per_bar = 0
+    bar_dur = 0
     i = 0
     for idx, row in df.iterrows():
-        
+
         if row['event'] in ['SOS', 'Downbeat']:
-            if row['event'] == "SOS" and measure_durations[i] != 0:
-                pickup = stream.Measure(number = 0) #TODO: Finish this
+            # If there is no pickup, then don't create a measure for the SOS call
+            if measure_durations[i] == 0:
                 i += 1
-            
-            # TODO: Consider making Measures objects to correctly display pickups (measurenumber = 0)
+                continue
+
             # If a new time signature is detected
-            if beats_per_bar != measure_durations[i]:
-                beats_per_bar = measure_durations[i]
+            new_time_signature_detected = ((beats_per_bar != measure_durations[np.max([1, i])]) or (bar_dur != beats_per_bar))
+            if new_time_signature_detected:
+                beats_per_bar = measure_durations[np.max([1, i])]
                 
                 multiplier = 1
                 while (beats_per_bar * multiplier) % 1 != 0:
@@ -258,12 +528,13 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]],
                 denominator = 2**(multiplier + 1)
                 
                 ts = meter.TimeSignature(f'{nominator}/{denominator}')
-
+                ts.barDuration.quarterLength = measure_durations[i]
+                bar_dur = measure_durations[i]
+                
                 treble_staff.insert(row['onset'], ts)
                 bass_staff.insert(row['onset'], ts)
-                    
-            if row['event'] != "SOS":
-                i += 1
+            
+            i += 1
     
         elif row['event'] == "Tempo":
             metronome_mark = tempo.MetronomeMark(number = row['offset'])
@@ -271,10 +542,9 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]],
             treble_staff.insert(row['onset'], metronome_mark)
             
         elif row['event'] == "EOS":
-            final_barline = bar.Barline('final')
-            treble_staff.append(final_barline)
-            bass_staff.append(final_barline)
-        
+            treble_staff.append(bar.Barline('final'))
+            bass_staff.append(bar.Barline('final'))
+            
         else:  
             if len(row['event']) > 1:
                 xml_note = chord.Chord(row['event'])
@@ -297,55 +567,114 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]],
                     staff = bass_staff
                 elif lowest_note.octave >= 4:
                     staff = treble_staff
-                else:
-                    staff = treble_staff # TODO: Split the chord into notes again
+                else:                    
+                    # Split the chord into notes again
+                    split_chord = xml_note.notes
+                    
+                    bass_notes, treble_notes = [], []
+                    for n in split_chord:
+                        if n.octave < 4:
+                            bass_notes.append(n)
+                        else:
+                            treble_notes.append(n)
+                    
+                    for c, staff in [(bass_notes, bass_staff), (treble_notes, treble_staff)]:
+                        if len(c) > 1:
+                            ch = chord.Chord(c)
+                            ch.duration = xml_note.duration
+                            ch.offset = xml_note.offset
+                            staff.insert(ch.offset, ch)
+                            
+                        else:
+                            c[0].quarterLength = xml_note.quarterLength
+                            staff.insert(xml_note.offset, c[0])
+                    
+                    continue
+
             else:       
                 staff = treble_staff if xml_note.octave >= 4 else bass_staff
             
-            if i == 0:
-                pickup.append(xml_note) # TODO: This will never be true right now. Fix it
-            else:
-                # Insert into notes if the onset is already occupied
-                staff.insert(xml_note.offset, xml_note)
-    
+            staff.insert(xml_note.offset, xml_note)
+
     print("Done with adding to the streams. Now we make the score!") 
     # Connect the streams to a score
-    score = stream.Score()        
-
+    score = stream.Score() 
+    
+    # Post process the two staves
+    treble_staff.makeVoices(inPlace = True, fillGaps = False)    
+    HelenaMakeMeasures(treble_staff, inPlace = True)
+    treble_staff.makeTies(inPlace = True)
+    treble_staff.makeRests(fillGaps = True, inPlace = True, timeRangeFromBarDuration = True)
+    
+    bass_staff.makeVoices(inPlace = True, fillGaps = False)
+    HelenaMakeMeasures(bass_staff, inPlace = True)
+    bass_staff.makeTies(inPlace = True)
+    bass_staff.makeRests(fillGaps = True, inPlace = True, timeRangeFromBarDuration = True)
+    
     # Add the staffs to the score
     score.insert(0, treble_staff)
     score.insert(0, bass_staff)
     piano = layout.StaffGroup([treble_staff, bass_staff], symbol='brace')
     score.insert(0, piano)
-    
-    print("We have a score! We fill in rests")
+
+    # print("We have a score! We fill in rests")
     # Fill in rests where there is empty space
-    for part in score.parts:
-        part.makeRests(fillGaps=True, inPlace=True)
+    # for part in score.parts:
+    #     part.makeRests(fillGaps=True, inPlace=True)
 
     print("We propose a key")
     # Change pitches to the analyzed key 
     # NOTE: If the song changes key throughout, it may screw-up the key analysis
     proposed_key = score.analyze('key')
-    
+
     print("We update the pitches if the key has flats")
     # Only update the pitches if the key signature includes flats
     if proposed_key.sharps < 0:
         score = _update_pitches(score, proposed_key)
 
     # Add the key signature
-    key_signature = key.KeySignature(proposed_key.sharps)
-    treble_staff.keySignature = key_signature
-    bass_staff.keySignature = key_signature
-
-    # NOTE: These MAY BE useful in the future
-    # score.makeNotation(inPlace=True)
-    # treble_staff.makeAccidentals(inPlace = True)
-    # bass_staff.makeAccidentals(inPlace = True)
+    treble_staff.keySignature = key.KeySignature(proposed_key.sharps)
+    bass_staff.keySignature = key.KeySignature(proposed_key.sharps)
 
     print("We can show the score and write it to a file")
     # score.show()
-    score.write('musicxml', fp=output_dir)
+    score.write('musicxml', fp=f'{output_dir}.xml')
+
+    def adjust_voice_numbers(file_path):
+        tree = ET.parse(file_path)
+        root = tree.getroot()
+        
+        # Dictionary to keep track of the highest voice number used in each staff
+        highest_voice = 1
+        voice_mapping = {}
+        
+        # Find all measure elements to iterate through
+        measures = root.findall('.//measure')
+        
+        for measure in measures:
+            for note in measure.findall('.//note'):
+                staff = note.find('staff')
+                voice = note.find('voice')
+                
+                if staff is not None and voice is not None:
+                    staff_id = int(staff.text)
+                    voice_id = int(voice.text)
+                    
+                    if (staff_id, voice_id) not in voice_mapping.keys():
+                        voice_mapping[(staff_id, voice_id)] = highest_voice
+                        highest_voice += 1
+                    
+                    voice.text = str(voice_mapping[(staff_id, voice_id)])
+        
+        # Delete the current file
+        os.remove(file_path)
+        
+        # Save the adjusted MusicXML file
+        tree.write(file_path)
+
+    # Adjust the voice numbers (MuseScore does not allow 0-numbered voices)
+    adjust_voice_numbers(f'{output_dir}.xml')
+    
     return score
 
 
@@ -463,7 +792,15 @@ def _prepare_data_frame(event_sequence: list[tuple[str, int]]) -> pd.DataFrame:
     
     # Add last downbeat to indicate end-of-score
     df = pd.concat([df, pd.DataFrame([{'event': "EOS", 'onset': beat, 'offset': beat}])], ignore_index=True)
-            
+    
+    df = df.sort_values(by=['onset', 'offset']).reset_index(drop=True)
+    
+    # Add relative offsets in reference to each downbeat
+    downbeats = df[df['event'] == 'Downbeat']['onset'].values.tolist() + [beat]
+    for i in range(len(downbeats) - 1):
+        mask = (df['onset'] >= downbeats[i]) & (df['onset'] < downbeats[i+1])
+        df.loc[mask, 'rel_onset'] = df.loc[mask, 'onset'] - downbeats[i]
+    
     return df
 
 
@@ -496,22 +833,22 @@ if __name__ == '__main__':
 
     # ----------------------------- For inference ----------------------------- #
     inference_dir = "inference_songs"
-    new_song_name = "chord.wav"
+    new_song_name = "pirate_ensemble_105.mp3"
     
     # ----------------------------- For preprocessing ----------------------------- #
     data_dir = "preprocessed_data"
     
     # ------------------------------- Choose model ------------------------------- #
-    model_name = '07-05-24_musescore.pth' 
+    model_name = '29-05-24_musescore.pth' 
     
-    new_song = False
+    new_song = True
     preprocess = False
-    overlap = True
+    overlap = False
     init_bpm = 130
     
     if new_song:
     
-        inference(init_bpm = init_bpm, inference_dir = inference_dir, new_song_name = new_song_name, model_name = model_name, saved_seq = False, just_save_seq = False)
+        inference(init_bpm = init_bpm, inference_dir = inference_dir, new_song = new_song_name, model_name = model_name, saved_seq = True, just_save_seq = False)
         
     elif preprocess:
         test_preprocessing(data_dir)
