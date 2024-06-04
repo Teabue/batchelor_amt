@@ -7,6 +7,7 @@ import torch.nn as nn
 from utils.model import Transformer
 from utils.data_loader_2 import TransformerDataset  
 from utils.vocabularies import Vocabulary
+from utils.train_loss import CustomLoss
 
 
 
@@ -129,8 +130,9 @@ def simple_setup(device = 'cuda',
                 d_ff = 2048,
                 max_seq_length = 1024, # doesn't really matter, can be set to whatever as long as its larger than the longest sequence - it's a pteprocess step for PE
                 dropout = 0.1,
+                logger_folder = None,
                 pretrained_run_path = None,
-                data_parallelism=False):
+                data_parallelism = False):
 
     # TODO: Temporary solution, way into the future when I actually feel like refactoring, I'll save config run files
     with open(os.path.join(data_dir,'preprocess_config.yaml'), 'r') as file:
@@ -152,7 +154,8 @@ def simple_setup(device = 'cuda',
         model = nn.DataParallel(model)
     model.to(device)
     
-    criterion = nn.CrossEntropyLoss(ignore_index=0) # we ignore the padding token
+    criterion = CustomLoss(vocab, ignore_class=0, device=device, logger_folder=logger_folder) # ignore Padding tokens
+    # criterion = nn.CrossEntropyLoss(ignore_index=0) 
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.98), eps=1e-9)
     dataset = TransformerDataset(data_dir)
@@ -207,6 +210,7 @@ if __name__ == '__main__':
                                                                         d_ff = config['d_ff'], 
                                                                         max_seq_length = config['max_seq_length'], 
                                                                         dropout = config['dropout'],
+                                                                        logger_folder = config['run_save_path'],
                                                                         pretrained_run_path=pretrained_run_path,
                                                                         data_parallelism=data_parallelism)
     
