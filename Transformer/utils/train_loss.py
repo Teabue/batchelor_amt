@@ -26,6 +26,8 @@ class CustomLoss(nn.Module):
                 
         if logger_folder:
             self.initialize_logger(logger_folder)
+        else:
+            self.logger = None
                 
     def initialize_logger(self, logger_folder):
         # Create a logger
@@ -168,11 +170,11 @@ if __name__ == '__main__':
 
     vocab = Vocabulary(vocab_config)
     vocab.define_vocabulary(4)
-    num_test_tokens = 2000
+    num_test_tokens = 3000
     pitch_logits = torch.randn(num_test_tokens, vocab.vocab_size)
     labels = torch.randint(0, vocab.vocab_size, (num_test_tokens,))
-    
-    loss_class = CustomLoss(vocab)
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    loss_class = CustomLoss(vocab, device='cpu')
     
     loss = loss_class.compute_loss(pitch_logits, labels)
     
