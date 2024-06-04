@@ -55,7 +55,7 @@ class Vocabulary:
     
     
     def define_vocabulary(self, h_bars=None):
-        self.vocabulary: dict[EventType, tuple[int,int]] = {} 
+        self.vocabulary: dict[str, tuple[EventType,tuple[int,int]]] = {} 
         token_offset = 0
         
         # Set special tokens
