@@ -70,7 +70,7 @@ class Song:
             beats_in_seq = np.random.randint(min_size, max_size + 1)
         else:
             new_frame = spectrogram.shape[1]
-            return torch.from_numpy(spectrogram)[:, cur_frame:]
+            return torch.from_numpy(spectrogram)[:, cur_frame:], new_frame
         
         time_to_add = beats_in_seq * 60 / bpm
         new_frame = cur_frame + np.argmin(np.abs(frame_times - time_to_add))

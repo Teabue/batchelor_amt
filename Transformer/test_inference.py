@@ -1,4 +1,5 @@
 import copy
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import os
@@ -282,6 +283,55 @@ def HelenaMakeMeasures(
             # may need to handle spanners; already have s as site
             s.insert(post.elementOffset(e), e)
 
+def plot_with_custom_colors(m21_stream, alpha=0.5):
+    # Flatten the stream to handle all notes and chords
+    flat_stream = m21_stream.flatten()
+    
+    # Extract all notes and chords with their offsets
+    elements = [(elem.offset, elem) for elem in flat_stream.notesAndRests]
+    
+    fig, ax = plt.subplots()
+
+    # Determine the relevant y-axis range
+    all_pitches = [p.midi for elem in flat_stream.notesAndRests for p in elem.pitches if isinstance(elem, (note.Note, chord.Chord))]
+    if all_pitches:
+        min_pitch = min(all_pitches)
+        max_pitch = max(all_pitches)
+    else:
+        min_pitch, max_pitch = 21, 108  # Default range if no notes
+
+    for offset, elem in elements:
+        if isinstance(elem, note.Note):
+            color = elem.style.color if elem.style.color else 'black'
+            ax.broken_barh([(offset, elem.quarterLength)], (elem.pitch.midi - 0.5, 1), facecolors=color, alpha=alpha)
+        elif isinstance(elem, chord.Chord):
+            for pitch in elem.pitches:
+                color = elem.style.color if elem.style.color else 'black'
+                ax.broken_barh([(offset, elem.quarterLength)], (pitch.midi - 0.5, 1), facecolors=color, alpha=alpha)
+    
+    ax.set_xlabel('Time (quarter lengths)')
+    ax.set_ylabel('MIDI Pitch')
+    
+    # Set the y-axis range to the relevant pitches
+    ax.set_ylim(min_pitch - 1, max_pitch + 1)
+    y_ticks = range(min_pitch, max_pitch + 1)
+    ax.set_yticks(y_ticks)
+
+    # Set y-axis labels to note names
+    y_tick_labels = [note.Note(midi).nameWithOctave for midi in y_ticks]
+    ax.set_yticklabels(y_tick_labels)
+
+    # Add alternating background colors for rows
+    for i in range(min_pitch, max_pitch, 2):
+        ax.axhspan(i - 0.5, i + 0.5, facecolor='white', alpha=0.3, linewidth=0)
+        ax.axhspan(i + 0.5, i + 1.5, facecolor='lightgrey', alpha=0.3, linewidth=0)
+
+    # Add dotted horizontal lines for clarity
+    for tick in y_ticks:
+        ax.axhline(tick - 0.5, color='grey', linestyle='dotted', linewidth=0.5)
+    
+    plt.show()
+
 def test_preprocessing(data_dir: str):
     songs_dir = os.path.join(data_dir, "spectrograms")
     songs = [os.path.splitext(file)[0] for file in os.listdir(songs_dir)]
@@ -360,78 +410,172 @@ def inference(init_bpm: int, inference_dir: str, new_song: str, model_name: str,
 def overlap_gt_and_pred(gt_score: stream.Score, pred_score: stream.Score, output_dir: str):
     
     # Boolean capital letters for (pitch, onset, offset) - TTT is just default black
-    cm_colors = {"TTF": "purple", "FTT": "yellow", "FFF": "red", "FN": "blue"}
+    cm_colors = {"GT": "blue", "PRED": "red"}
     
     # I wish I knew this function existed before...
     gt_score = stream.tools.removeDuplicates(gt_score)
+    # pred_score = stream.tools.removeDuplicates(pred_score)
     
     # Convert scores to a time series with only the available predicted elements
     gt_tree = gt_score.asTimespans(classList=(note.Note, chord.Chord, meter.TimeSignature, tempo.MetronomeMark))
     pred_tree = pred_score.asTimespans(classList=(note.Note, chord.Chord, meter.TimeSignature, tempo.MetronomeMark))
     gt_time = 0
     
-    # Go through each element in the prediction stream
-    for e in pred_tree:
-        
-        event = e.element
-        
-        # Search for false negatives
-        while event.offset > gt_time:
-            gt_elements = gt_tree.elementsStartingAt(gt_time)
-            
-            # Insert the elements into the prediction stream
-            for gt_e in gt_elements:
-                gt_e.element.style.color = cm_colors["FN"]
-                pred_score.insert(gt_e.offset, gt_e.element)
-            
-            gt_time = gt_tree.getPosisionAfter(gt_time)
-        
-        # Go through the ground truth elements at the current onset
-        match_ = False   
-        for gt_e in gt_tree.elementsStartingAt(event.offset):
-            gt_event = gt_e.element
-            
-            if gt_event.classes[0] != event.classes[0]:
-                continue
-            
-            equal = _compare_elements(event, gt_event)
-            
-            if np.any(equal):
-                match_ = True
-                break
-        
-        # Neither the event, onset nor offset was correct
-        if not match_:
-            event.style.color = cm_colors["FFF"]
-            
-        elif isinstance(event, note.NotRest):
-            notes = event.notes if notes.isChord else event
-            
-            # See if any note(s) are partly correct
-            for idx, n in enumerate(notes):
-                if equal[idx, 0] and equal[idx, 1]:
-                    # Keep it black
-                    continue
-                elif not equal[idx, 0] and equal[idx, 1]:
-                    n.style.color = cm_colors["FTT"]
-                elif equal[idx, 0] and not equal[idx, 1]:
-                    n.style.color = cm_colors["TTF"]
-                else:
-                    n.style.color = cm_colors["FFF"]
-
-        # Update the ground truth time to see if we missed anything
-        gt_time = gt_tree.getPositionAfter(event.offset)
-    
-    pred_score.write('musicxml', fp=output_dir)
+    # Prepare new empty streams
+    t_staff = stream.PartStaff(id = "Treble")
+    b_staff = stream.PartStaff(id = "Bass")
     
     def _compare_elements(e1, e2):
         if isinstance(e1, note.NotRest):
-            return np.any([[[m1.midi == m2.midi, m1.quarterLength == m2.quarterLength] for m1 in e1.pitches] for m2 in e2.pitches], axis = 0)
+            return [[[m1.midi == m2.midi, e1.quarterLength == e2.quarterLength] for m1 in e1.pitches] for m2 in e2.pitches]
         elif isinstance(e1, meter.TimeSignature):
             return e1.ratioString == e2.ratioString
         elif isinstance(e1, tempo.MetronomeMark):
             return e1.number == e2.number
         return False
+    
+    for time_point in pred_tree.allOffsets():
+        
+        # Search for false negatives
+        while time_point > gt_time:
+            gt_elements = gt_tree.elementsStartingAt(gt_time)
+            
+            # Insert the elements into the overlap stream
+            for gt_e in gt_elements:
+                gt_e.element.offset = gt_time
+                gt_e.element.style.color = cm_colors["GT"]
+                
+                if isinstance(gt_e.element, tempo.MetronomeMark):
+                    t_staff.insert(gt_time, gt_e.element)
+                elif isinstance(gt_e.element, meter.TimeSignature):
+                    t_staff.insert(gt_time, gt_e.element)
+                    b_staff.insert(gt_time, gt_e.element)
+                elif isinstance(gt_e.element, note.NotRest):
+                    _assign_and_insert_into_staff(gt_e.element, t_staff, b_staff)
+                
+            # Update the ground truth time to see if we missed anything
+            gt_time = gt_tree.getPositionAfter(gt_time)
+            if gt_time is None:
+                gt_time = time_point + 1
+        
+        # Go through each element in the prediction stream
+        processed_time_sig_offsets = set()
+        not_rest_mask = {} # Mask for events in the gt stream
+        for e in pred_tree.elementsStartingAt(time_point):
+            pred_mask = {}
+            event = e.element
+            event.offset = time_point
+            
+            # If the event is a time signature and its offset has already been processed, skip it
+            if isinstance(event, meter.TimeSignature):
+                if event.offset in processed_time_sig_offsets:
+                    continue
+                processed_time_sig_offsets.add(time_point)
+            
+            # We need to prepare the mask for the event in case there are no gt's
+            if isinstance(event, note.NotRest):
+                pred_mask[event] = np.full(len(event.pitches), False)
+            else:
+                pred_mask[event] = np.array([False])
+                
+            # Go through the ground truth elements at the current onset
+            for gt_e in gt_tree.elementsStartingAt(time_point):
+                gt_event = gt_e.element
+                gt_event.offset = time_point
+                
+                if (gt_event.classes[0] != event.classes[0]):
+                    # If one is a chord and the other is a note for example, it's fine
+                    if not (isinstance(gt_event, note.NotRest) and isinstance(event, note.NotRest)):
+                        continue
+                
+                # Compare the elements
+                equal = _compare_elements(event, gt_event)
+                
+                # Update the matches of the event and gt event
+                if isinstance(gt_event, note.NotRest):
+                    matched_gt_notes = np.any(np.all(equal, axis = 2), axis = 1)
+                    not_rest_mask[gt_event] = np.full(len(gt_event.pitches), False)
+                    not_rest_mask[gt_event][matched_gt_notes] = True
+
+                    matched_event_notes = np.any(np.all(equal, axis = 2), axis = 0)
+                    pred_mask[event][matched_event_notes] = True
+
+                else:
+                    if equal:
+                        pred_mask[event] = np.array([True])
+            
+            # Insert predictions into the stream
+            for e, mask in pred_mask.items():
+                
+                if isinstance(e, note.NotRest):
+                    for idx, n in enumerate(e if e.isChord else [e]):
+                        if not mask[idx]:
+                            n.style.color = cm_colors["PRED"]
+                    
+                    # Insert into the overlap stream
+                    _assign_and_insert_into_staff(e, t_staff, b_staff)
+                else:
+                    if not mask:
+                        e.style.color = cm_colors["PRED"]
+                    
+                assert e.offset == time_point
+            
+            if isinstance(event, tempo.MetronomeMark):
+                t_staff.insert(time_point, event)
+            elif isinstance(event, meter.TimeSignature):
+                t_staff.insert(time_point, event)
+                b_staff.insert(time_point, event)      
+            
+        # Insert any notes in a gt chord that might have been missed (false negatives)
+        if not_rest_mask:
+            for c, mask in not_rest_mask.items():
+                trimmed_gt = []
+                for idx, n in enumerate(c if c.isChord else [c]):
+                    if not mask[idx]:
+                        n.style.color = cm_colors["GT"]
+                        trimmed_gt.append(n)
+                
+                trimmed_gt = chord.Chord(trimmed_gt)
+                trimmed_gt.offset = time_point
+                assert c.offset == time_point
+                assert trimmed_gt.offset == time_point
+                # Insert into the overlap stream
+                _assign_and_insert_into_staff(trimmed_gt, t_staff, b_staff)
+        
+        # Update the ground truth time to see if we missed anything
+        gt_time = gt_tree.getPositionAfter(time_point)
+        if gt_time is None:
+            gt_time = time_point + 1
+    
+    # ----------------------------- Post process ----------------------------- #
+    for part in [t_staff, b_staff]:
+        part.makeVoices(inPlace = True, fillGaps = False)
+        HelenaMakeMeasures(part, inPlace = True)
+        part.makeTies(inPlace = True)
+        part.makeRests(fillGaps = True, inPlace = True, timeRangeFromBarDuration = True)
+    
+    overlap_score = stream.Score(id = "overlap")
+    
+    # Add the staffs to the score
+    overlap_score.insert(0, t_staff)
+    overlap_score.insert(0, b_staff)
+    piano = layout.StaffGroup([t_staff, b_staff], symbol='brace')
+    overlap_score.insert(0, piano)
+
+    # Propose key signature
+    proposed_key = overlap_score.analyze('key')
+    if proposed_key.sharps < 0:
+        overlap_score = _update_pitches(overlap_score, proposed_key)
+
+    overlap_score.parts[0].keySignature = key.KeySignature(proposed_key.sharps)
+    overlap_score.parts[1].keySignature = key.KeySignature(proposed_key.sharps)
+
+    overlap_score.insert(0, metadata.Metadata())
+    overlap_score.metadata.title = os.path.basename(output_dir)
+    overlap_score.metadata.composer = "AMT Model (Red), GT (Blue)"
+    overlap_score.write('musicxml', fp=f'{output_dir}.xml')
+    
+    _adjust_voice_numbers(f'{output_dir}.xml')
        
         
 def create_midi_from_model_events(events, bpm_tempo, output_dir='', onset_only=False):
@@ -557,44 +701,9 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]],
             if row['duration'] == 0:
                 xml_note = xml_note.getGrace()
             
-            # Evenly distribute between treble and bass cleff - could be optimized
-            if xml_note.isChord:
-                highest_note = xml_note.sortAscending().pitches[-1]
-                lowest_note = xml_note.sortAscending().pitches[0]
-                
-                # Decide which staff to insert the chord into based on the pitches of the highest and lowest notes
-                if highest_note.octave < 4:
-                    staff = bass_staff
-                elif lowest_note.octave >= 4:
-                    staff = treble_staff
-                else:                    
-                    # Split the chord into notes again
-                    split_chord = xml_note.notes
-                    
-                    bass_notes, treble_notes = [], []
-                    for n in split_chord:
-                        if n.octave < 4:
-                            bass_notes.append(n)
-                        else:
-                            treble_notes.append(n)
-                    
-                    for c, staff in [(bass_notes, bass_staff), (treble_notes, treble_staff)]:
-                        if len(c) > 1:
-                            ch = chord.Chord(c)
-                            ch.duration = xml_note.duration
-                            ch.offset = xml_note.offset
-                            staff.insert(ch.offset, ch)
-                            
-                        else:
-                            c[0].quarterLength = xml_note.quarterLength
-                            staff.insert(xml_note.offset, c[0])
-                    
-                    continue
-
-            else:       
-                staff = treble_staff if xml_note.octave >= 4 else bass_staff
+            _assign_and_insert_into_staff(xml_note, treble_staff, bass_staff)
             
-            staff.insert(xml_note.offset, xml_note)
+            # staff.insert(xml_note.offset, xml_note)
 
     print("Done with adding to the streams. Now we make the score!") 
     # Connect the streams to a score
@@ -617,66 +726,93 @@ def translate_events_to_sheet_music(event_sequence: list[tuple[str, int]],
     piano = layout.StaffGroup([treble_staff, bass_staff], symbol='brace')
     score.insert(0, piano)
 
-    # print("We have a score! We fill in rests")
-    # Fill in rests where there is empty space
-    # for part in score.parts:
-    #     part.makeRests(fillGaps=True, inPlace=True)
-
     print("We propose a key")
     # Change pitches to the analyzed key 
     # NOTE: If the song changes key throughout, it may screw-up the key analysis
     proposed_key = score.analyze('key')
+    ks = key.KeySignature(proposed_key.sharps)
 
     print("We update the pitches if the key has flats")
     # Only update the pitches if the key signature includes flats
-    if proposed_key.sharps < 0:
-        score = _update_pitches(score, proposed_key)
-
+    # if proposed_key.sharps < 0:
+    #     score = _update_pitches(score, proposed_key)
+    score = score.makeAccidentals(alteredPitches = ks.alteredPitches, 
+                                  overrideStatus = True)
+    
     # Add the key signature
-    treble_staff.keySignature = key.KeySignature(proposed_key.sharps)
-    bass_staff.keySignature = key.KeySignature(proposed_key.sharps)
+    score.parts[0].keySignature = key.KeySignature(proposed_key.sharps)
+    score.parts[1].keySignature = key.KeySignature(proposed_key.sharps)
 
     print("We can show the score and write it to a file")
     # score.show()
+    score.insert(0, metadata.Metadata())
+    score.metadata.title = os.path.basename(output_dir)
+    score.metadata.composer = "Arr: AMT Model"
     score.write('musicxml', fp=f'{output_dir}.xml')
 
-    def adjust_voice_numbers(file_path):
-        tree = ET.parse(file_path)
-        root = tree.getroot()
-        
-        # Dictionary to keep track of the highest voice number used in each staff
-        highest_voice = 1
-        voice_mapping = {}
-        
-        # Find all measure elements to iterate through
-        measures = root.findall('.//measure')
-        
-        for measure in measures:
-            for note in measure.findall('.//note'):
-                staff = note.find('staff')
-                voice = note.find('voice')
-                
-                if staff is not None and voice is not None:
-                    staff_id = int(staff.text)
-                    voice_id = int(voice.text)
-                    
-                    if (staff_id, voice_id) not in voice_mapping.keys():
-                        voice_mapping[(staff_id, voice_id)] = highest_voice
-                        highest_voice += 1
-                    
-                    voice.text = str(voice_mapping[(staff_id, voice_id)])
-        
-        # Delete the current file
-        os.remove(file_path)
-        
-        # Save the adjusted MusicXML file
-        tree.write(file_path)
-
     # Adjust the voice numbers (MuseScore does not allow 0-numbered voices)
-    adjust_voice_numbers(f'{output_dir}.xml')
+    _adjust_voice_numbers(f'{output_dir}.xml')
     
     return score
 
+def _assign_and_insert_into_staff(no, t_staff, b_staff):
+    # Evenly distribute between treble and bass cleff - could be optimized
+    # Split into notes 
+    split_chord = no.notes if no.isChord else [no]
+    
+    bass_notes, treble_notes = [], []
+    for n in split_chord:
+        if n.octave < 4:
+            bass_notes.append(n)
+        else:
+            treble_notes.append(n)
+    
+    for c, staff in [(bass_notes, b_staff), (treble_notes, t_staff)]:
+        if len(c) == 0:
+            continue
+        
+        if len(c) > 1:
+            ch = chord.Chord(c)
+            ch.duration = no.duration
+            ch.offset = no.offset
+            staff.insert(ch.offset, ch)
+            
+        else:
+            c[0].quarterLength = no.quarterLength
+            staff.insert(no.offset, c[0])
+        
+
+def _adjust_voice_numbers(file_path):
+    tree = ET.parse(file_path)
+    root = tree.getroot()
+    
+    # Dictionary to keep track of the highest voice number used in each staff
+    highest_voice = 1
+    voice_mapping = {}
+    
+    # Find all measure elements to iterate through
+    measures = root.findall('.//measure')
+    
+    for measure in measures:
+        for note in measure.findall('.//note'):
+            staff = note.find('staff')
+            voice = note.find('voice')
+            
+            if staff is not None and voice is not None:
+                staff_id = int(staff.text)
+                voice_id = int(voice.text)
+                
+                if (staff_id, voice_id) not in voice_mapping.keys():
+                    voice_mapping[(staff_id, voice_id)] = highest_voice
+                    highest_voice += 1
+                
+                voice.text = str(voice_mapping[(staff_id, voice_id)])
+    
+    # Delete the current file
+    os.remove(file_path)
+    
+    # Save the adjusted MusicXML file
+    tree.write(file_path)
 
 def _update_pitches(score, key_sig) -> stream.Score:
     for n in score.recurse().notes:
@@ -833,7 +969,7 @@ if __name__ == '__main__':
 
     # ----------------------------- For inference ----------------------------- #
     inference_dir = "inference_songs"
-    new_song_name = "pirate_ensemble_105.mp3"
+    new_song_name = "sans.mp3"
     
     # ----------------------------- For preprocessing ----------------------------- #
     data_dir = "preprocessed_data"
@@ -841,14 +977,14 @@ if __name__ == '__main__':
     # ------------------------------- Choose model ------------------------------- #
     model_name = '29-05-24_musescore.pth' 
     
-    new_song = True
+    new_song = False
     preprocess = False
-    overlap = False
-    init_bpm = 130
+    overlap = True
+    init_bpm = 128
     
     if new_song:
     
-        inference(init_bpm = init_bpm, inference_dir = inference_dir, new_song = new_song_name, model_name = model_name, saved_seq = True, just_save_seq = False)
+        inference(init_bpm = init_bpm, inference_dir = inference_dir, new_song = new_song_name, model_name = model_name, saved_seq = False, just_save_seq = False)
         
     elif preprocess:
         test_preprocessing(data_dir)
