@@ -66,7 +66,9 @@ class Song:
         min_size = self.config['min_beats']
         max_size = self.config['max_beats'] if beats_left > self.config['max_beats'] else beats_left
         
-        if max_size >= min_size:
+        if 0 < np.round(beats_left - min_size) < max_size:
+            beats_in_seq = np.round(beats_left - min_size)
+        elif max_size >= min_size:
             beats_in_seq = np.random.randint(min_size, max_size + 1)
         else:
             new_frame = spectrogram.shape[1]
@@ -235,8 +237,6 @@ class MuseScore(Song):
             self.score = self.score.expandRepeats()
             self.contains_fermata, self.total_duration = fermata_check(self.score)
             self.expansion_succes = True
-            self.pickup_measure = False
-            self.compensation_measure = False
         except Exception:
             print(f"----------------------Could not expand repeats for {self.song_name} due to notation mistakes. It will be removed from the dataset >:(----------------------")
             self.expansion_succes = False
@@ -255,15 +255,12 @@ class MuseScore(Song):
         for measure in self.score.parts[0].getElementsByClass(stream.Measure):
             # Check if it's a pickup measure (anacrusis)
             if measure.paddingLeft != 0:
-                self.pickup_measure = True
                 continue
-            if measure.paddingRight != 0:
-                self.compensation_measure = True
-                
+            
             downbeat = measure.offset
             df = pd.concat([df, pd.DataFrame([{'pitch': -1, 'onset': downbeat, 'offset': downbeat}])], ignore_index=True)
         # Add the downbeat marking the end of the score
-        df = pd.concat([df, pd.DataFrame([{'pitch': -1, 'onset': self.score.highestTime, 'offset': self.score.highestTime}])], ignore_index=True)
+        # df = pd.concat([df, pd.DataFrame([{'pitch': -1, 'onset': self.score.highestTime, 'offset': self.score.highestTime}])], ignore_index=True)
         
         # ---------------------- Add notes and chords ---------------------- #  
         for element in self.score.flatten().notes:
@@ -361,8 +358,13 @@ class MuseScore(Song):
         # Initialize a list to store the chunk sizes
         cur_beat = 0
         while max_size >= min_size:
-            # Generate a random size between min_size and max_size
-            beats_in_seq = np.random.randint(min_size, max_size + 1)
+            
+            if 0 < np.round(total_duration - min_size) < max_size:
+                # Makes sures that we cut the entire spectrogram by making max = min
+                beats_in_seq = np.round(total_duration - min_size)
+            else:
+                # Generate a random size between min_size and max_size
+                beats_in_seq = np.random.randint(min_size, max_size + 1)
             
             # Find the closest frame in the spectrogram and return its index
             frame = np.argmin(np.abs(frame_beats - (cur_beat + beats_in_seq)))
@@ -372,11 +374,14 @@ class MuseScore(Song):
             
             # Gradually decrease the max_size to cut up as much as possible of the spectrogram
             if total_duration < max_size:
-                max_size = int(total_duration)
+                max_size = np.round(total_duration)
             
             # Add the frame to the indices
             indices.extend([frame])
             sequence_beats.extend([np.round(cur_beat)]) # NOTE: This will give a little round-off error as opposed to looking up the frame_beat. However, it's necessary to preserve the grid-structure
+        
+        if sequence_beats[-1] != self.total_duration:
+            print(f"----- {self.song_name} doesn't align properly with beats and slicing? -----")
         
         if verbose:
                 
