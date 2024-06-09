@@ -37,9 +37,6 @@ class Song:
         """
         x, sr = librosa.load(self.song_path, sr=self.config['sr'])
         
-        if save_path is None:
-            save_path = os.path.join(self.config['output_dir'], 'spectrograms', f'{self.song_name}.npy')
-        
         if self.config['preprocess_method'] == 'cqt':
             cqt = librosa.cqt(y=x, sr=sr, hop_length=self.config['hop_length'], n_bins=self.config['n_bins'])
             cqt = librosa.amplitude_to_db(np.abs(cqt))
@@ -55,7 +52,9 @@ class Song:
         else:
             raise ValueError("Invalid choice of preprocess method.")
         
-        np.save(save_path, spectrogram)
+        if save_path is not None:
+            np.save(save_path, spectrogram)
+            
         return spectrogram
         
     def preprocess_inference_new_song(self, spectrogram, cur_frame: int, bpm: int = 120) -> torch.Tensor:
@@ -202,7 +201,7 @@ class Maestro(Song):
             
         
     def preprocess(self) -> None:
-        spectrogram = self.compute_spectrogram()
+        spectrogram = self.compute_spectrogram(save_path = os.path.join(self.config['output_dir'], 'spectrograms', f'{self.song_name}.npy'))
         df_onset_offset = self.compute_onset_offset_times()
         df_labels = self.compute_labels_and_segments(df_onset_offset, spectrogram)
         return df_labels
@@ -526,7 +525,7 @@ class MuseScore(Song):
         return merged
             
     def preprocess(self, **kwargs) -> None:
-        spectrogram = self.compute_spectrogram()
+        spectrogram = self.compute_spectrogram(save_path = os.path.join(self.config['output_dir'], 'spectrograms', f'{self.song_name}.npy'))
         df_onset_offset = self.compute_onset_offset_beats()
         df_labels = self.compute_labels_and_segments(df_onset_offset, spectrogram, **kwargs)
         return df_labels

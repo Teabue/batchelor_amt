@@ -1,4 +1,12 @@
-from test_inference import *
+import numpy as np
+import os
+import pandas as pd
+import yaml
+
+from test_inference import Inference
+from utils.vocabularies import Vocabulary
+
+from music21 import converter
 
 # --------------------------------- Collect configs -------------------------------- #
 with open("Transformer/configs/preprocess_config.yaml", 'r') as f:
@@ -24,7 +32,7 @@ model_name = '29-05-24_musescore.pth'
 
 # --------------------------------- Collect directories -------------------------------- #
 output_dir = "inference_songs"
-data_dir= configs['preprocess']['output_dir'] # Only used for preprocessing
+data_dir = configs['preprocess']['output_dir']
 audio_dirs = np.asarray(configs['preprocess']['data_dirs'])
 os.makedirs(output_dir, exist_ok = True)
 
@@ -77,4 +85,5 @@ for song in songs:
     pred_score = inference.inference(init_bpm = init_bpm, saved_seq = saved_seq, just_save_seq = False)
 
     # ------------------------------- Overlap ground truth with prediction score ------------------------------------ #
-    inference.overlap_gt_and_pred(gt, pred_score)
+    if pred_score is not None:
+        inference.overlap_gt_and_pred(gt, pred_score)

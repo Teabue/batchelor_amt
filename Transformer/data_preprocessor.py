@@ -48,7 +48,7 @@ class DataPreprocessor:
         # Get song paths from the data directories
         song_paths = []
         for datafolder in self.config['data_dirs']:
-            song_paths.extend([os.path.join(datafolder, file) for file in os.listdir(datafolder) if os.path.splitext(file)[1] in self.config['audio_file_extension']])
+            song_paths.extend([os.path.join(datafolder, file) for file in os.listdir(datafolder) if file.split(".")[1] in self.config['audio_file_extension']])
         
         # Get train test splits
         train, temp = train_test_split(song_paths, test_size=1-self.config['train'], random_state=self.config['seed'])

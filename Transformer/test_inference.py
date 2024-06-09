@@ -1,18 +1,16 @@
 import copy
+import json
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
 import os
 import pandas as pd
+import torch
 import yaml
-from tqdm import tqdm
-import json
 import xml.etree.ElementTree as ET
 
 from fractions import Fraction
 from mido import Message, MetaMessage, MidiFile, MidiTrack, bpm2tempo, second2tick
-from music21 import *
-from torch.nn.utils.rnn import pad_sequence
+from music21 import converter, stream, note, chord, duration, meter, tempo, spanner, clef, layout, key, bar, metadata
 
 from utils.vocabularies import Vocabulary
 from utils.preprocess_song import Song
@@ -182,13 +180,15 @@ class Inference:
             
     def inference(self, init_bpm: int, saved_seq: bool = False, just_save_seq: bool = False) -> stream.Score:
         
-        os.makedirs(os.path.join(self.output_dir, "spectrograms"), exist_ok=True)
         tgt_vocab_size = self.vocab.vocab_size
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         if not saved_seq:
             song = Song(self.audio_dir, self.pre_config)
-            spectrogram = song.compute_spectrogram(save_path=os.path.join(self.output_dir, "spectrograms", self.song_name))
+            if self.data_dir is None:
+                spectrogram = song.compute_spectrogram()
+            else:
+                spectrogram = np.load(os.path.join(self.data_dir, "spectrograms", f"{self.song_name}.npy"))
             
             model = Transformer(self.train_config['n_mel_bins'], tgt_vocab_size, 
                                 self.train_config['d_model'], self.train_config['num_heads'], 
@@ -223,7 +223,9 @@ class Inference:
                     cur_bpm = events[np.where([event[0] == "tempo" for event in events])[0][-1]][1]
             
             os.makedirs(os.path.join(self.output_dir, 'seq_predictions'), exist_ok=True)        
-            np.save(os.path.join(self.output_dir, 'seq_predictions', self.song_name), sequence_events)
+            
+            if sequence_events:
+                np.save(os.path.join(self.output_dir, 'seq_predictions', self.song_name), sequence_events)
         
         else:
             sequence_events = np.load(os.path.join(self.output_dir, 'seq_predictions', f'{self.song_name}.npy'))
@@ -499,6 +501,10 @@ class Inference:
         Returns:
             pd.DataFrame: Dataframe with columns: event, onset and offset.
         """
+        
+        if len(event_sequence) == 0:
+            print(f"Empty event sequence for song: {self.song_name}. Aborting sheet process")
+            return
         
         treble_staff = stream.PartStaff(id="TrebleStaff")
         bass_staff = stream.PartStaff(id="BassStaff")
@@ -1104,18 +1110,6 @@ class Inference:
         
         return df
 
-    # def _update_pitches(score, key_sig) -> stream.Score:
-        #     for n in score.recurse().notes:
-        #         if isinstance(n, chord.Chord):
-        #             for n_ in n:
-        #                 if n_.pitch.accidental is not None and key_sig.accidentalByStep(n_.transpose(1).step) is not None:
-        #                     n_.pitch = n_.pitch.getEnharmonic()
-        #         else:
-        #             if n.pitch.accidental is not None and key_sig.accidentalByStep(n.transpose(1).step) is not None:
-        #                 n.pitch = n.pitch.getEnharmonic()
-
-        #     return score
-
 if __name__ == '__main__':    
     # --------------------------------- Collect configs -------------------------------- #
     with open("Transformer/configs/preprocess_config.yaml", 'r') as f:
@@ -1142,9 +1136,14 @@ if __name__ == '__main__':
     # ----------------------------- Choose song ----------------------------- #
     new_song_name = "sans"
     
+    # ----------------------------- Choose the type of inference ----------------------------- #
+    new_song = True
+    preprocess = True
+    overlap = True
+    
     # --------------------------------- Collect directories -------------------------------- #
     output_dir = "inference_songs"
-    data_dir= configs['preprocess']['output_dir']
+    data_dir= configs['preprocess']['output_dir'] if preprocess else None
     audio_dirs = np.asarray(configs['preprocess']['data_dirs'])
     
     all_paths = [[os.path.exists(os.path.join(aud_path, f"{new_song_name}.{ext}")) for ext in pre_configs['audio_file_extension']] for aud_path in audio_dirs]
@@ -1162,21 +1161,18 @@ if __name__ == '__main__':
     inference = Inference(vocab=vocab, configs = configs, dirs = dirs, 
                           song_name = new_song_name, model_name = model_name)
     
-    # ----------------------------- Choose the type of inference ----------------------------- #
-    new_song = False
-    preprocess = False
-    overlap = True
-    init_bpm = 128
-    
     if new_song:
+        print(f"Performing inference on a new song: {new_song_name}")
+        init_bpm = 128
         saved_seq = os.path.exists(os.path.join(dirs['out'], "seq_predictions", f"{new_song_name}.npy"))
         score = inference.inference(init_bpm = init_bpm, saved_seq = saved_seq, just_save_seq = False)
         
-    elif preprocess:
+    if preprocess:
+        print("Testing if the preprocessing works")
         inference.test_preprocessing()
         
-    elif overlap:
-        
+    if overlap:
+        print("Performing overlap of the ground truth score and the predicted")
         all_paths = [[os.path.exists(os.path.join(aud_path, f"{new_song_name}.{ext}")) for ext in configs['preprocess']['score_file_extensions']] for aud_path in audio_dirs]
         avail_paths = np.any(all_paths, axis = 1)
         if not np.any(avail_paths):
@@ -1193,7 +1189,9 @@ if __name__ == '__main__':
             raise Exception(f"The ground truth file of {new_song_name} could not be succesfully processed")
         
         # Get predicted score
+        init_bpm = gt.metronomeMarkBoundaries()[0][-1].getQuarterBPM()
         saved_seq = os.path.exists(os.path.join(dirs['out'], "seq_predictions", f"{new_song_name}.npy"))
         pred_score = inference.inference(init_bpm = init_bpm, saved_seq = saved_seq, just_save_seq = False)
         
-        inference.overlap_gt_and_pred(gt, pred_score)
+        if pred_score is not None:
+            inference.overlap_gt_and_pred(gt, pred_score)
