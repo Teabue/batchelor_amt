@@ -375,15 +375,47 @@ class Inference:
             if gt_time is None:
                 gt_time = time_point + 1
         
-        # TODO: If there is more gt stream, insert it all here as blue
+        # If there is more gt stream, insert the rest as false negatives
+        gt_time = gt_tree.getPositionAfter(time_point)
+        while gt_time is not None:
+            for e in gt_tree.elementsStartingAt(gt_time):
+                event = e.element
+                event.offset = gt_time
+                event.style.color = cm_colors["GT"]
+                
+                if isinstance(e, note.NotRest):
+                    self._assign_and_insert_into_staff(event, t_staff, b_staff)             
+                elif isinstance(event, tempo.MetronomeMark):
+                    t_staff.insert(gt_time, event)
+                elif isinstance(event, meter.TimeSignature):
+                    if event.offset in processed_time_sig_offsets:
+                        continue
+                    processed_time_sig_offsets.add(time_point)
+                    t_staff.insert(gt_time, event)
+                    b_staff.insert(gt_time, event)  
+                    
+            gt_time = gt_tree.getPositionAfter(gt_time)
+                
         
         # ----------------------------- Post process ----------------------------- #
-        for part in [t_staff, b_staff]:
-            part.makeVoices(inPlace = True, fillGaps = False)
-            self._makeMeasures(part, inPlace = True)
-            part.makeTies(inPlace = True)
-            part.makeRests(fillGaps = True, inPlace = True, timeRangeFromBarDuration = True)
-            part.measure(-1).rightBarline = bar.Barline('final')
+        ref_stream = t_staff if t_staff.highestTime > b_staff.highestTime else b_staff
+        
+        t_staff.makeVoices(inPlace = True, fillGaps = False)
+        b_staff.makeVoices(inPlace = True, fillGaps = False)
+        
+        self._makeMeasures(t_staff,
+                           refStreamOrTimeRange = ref_stream if ref_stream == b_staff else None,
+                           inPlace = True)
+        t_staff.makeTies(inPlace = True)
+        t_staff.makeRests(fillGaps = True, inPlace = True, timeRangeFromBarDuration = True)
+        t_staff.measure(-1).rightBarline = bar.Barline('final')
+        
+        self._makeMeasures(b_staff,
+                           refStreamOrTimeRange = ref_stream if ref_stream == t_staff else None,
+                           inPlace = True)
+        b_staff.makeTies(inPlace = True)
+        b_staff.makeRests(fillGaps = True, inPlace = True, timeRangeFromBarDuration = True)
+        b_staff.measure(-1).rightBarline = bar.Barline('final')
         
         overlap_score = stream.Score(id = "overlap")
         
@@ -501,6 +533,13 @@ class Inference:
                     multiplier = 1
                     while (beats_per_bar * multiplier) % 1 != 0:
                         multiplier += 1
+                        
+                        # We are beyond 64 notes. NOTE: This is yet to happen and the consequences are unknown
+                        if multiplier > 5:
+                            print(f"{self.song_name} has an irregular predicted time signature: {beats_per_bar}, at onset: {row['onset']} " \
+                                "We now set it manually to just 4")
+                            beats_per_bar = 4
+                            multiplier = 1
                     
                     nominator = int(beats_per_bar * multiplier)
                     denominator = 2**(multiplier + 1)
@@ -545,14 +584,21 @@ class Inference:
         score = stream.Score() 
         
         # Post process the two staves
-        treble_staff.makeVoices(inPlace = True, fillGaps = False)    
-        self._makeMeasures(treble_staff, inPlace = True)
+        treble_staff.makeVoices(inPlace = True, fillGaps = False)
+        bass_staff.makeVoices(inPlace = True, fillGaps = False)
+        
+        # Make sure both staves have the same amound of measures and that rests are displayed for all measures
+        ref_stream = treble_staff if treble_staff.highestTime > bass_staff.highestTime else bass_staff
+        self._makeMeasures(treble_staff,
+                           refStreamOrTimeRange = ref_stream if ref_stream == bass_staff else None,
+                           inPlace = True)
         treble_staff.makeTies(inPlace = True)
         treble_staff.makeRests(fillGaps = True, inPlace = True, timeRangeFromBarDuration = True)
         treble_staff.measure(-1).rightBarline = bar.Barline('final')
         
-        bass_staff.makeVoices(inPlace = True, fillGaps = False)
-        self._makeMeasures(bass_staff, inPlace = True)
+        self._makeMeasures(bass_staff, 
+                           refStreamOrTimeRange = ref_stream if ref_stream == treble_staff else None,
+                           inPlace = True)
         bass_staff.makeTies(inPlace = True)
         bass_staff.makeRests(fillGaps = True, inPlace = True, timeRangeFromBarDuration = True)
         bass_staff.measure(-1).rightBarline = bar.Barline('final')
