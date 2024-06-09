@@ -96,6 +96,11 @@ class Inference:
         # Compute the iou
         iou, sens, fnr, fpr, spec = inference_stats(elements)
         
+        # Append the statistics to a TSR file
+        stat_path = os.path.join(self.output_dir, "statistics")
+        with open(f"{stat_path}.txt", "a") as file:
+            file.write(f"{iou:.2f}\t{sens:.2f}\t{fnr:.2f}\t{fpr:.2f}\t{spec:.2f}\n")
+        
         plt.ioff()
         _, ax = plt.subplots()
 
