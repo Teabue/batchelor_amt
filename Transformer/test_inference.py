@@ -1,6 +1,7 @@
 import copy
 import json
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 import numpy as np
 import os
 import pandas as pd
@@ -13,7 +14,7 @@ from mido import Message, MetaMessage, MidiFile, MidiTrack, bpm2tempo, second2ti
 from music21 import converter, stream, note, chord, duration, meter, tempo, spanner, clef, layout, key, bar, metadata
 
 from utils.vocabularies import Vocabulary
-from utils.preprocess_song import Song
+from utils.preprocess_song import Song, MuseScore
 from utils.model import Transformer
 
 class Inference:
@@ -43,6 +44,7 @@ class Inference:
         def inference_stats(notes):
             # Separate the pitches into two sets based on their color
             pred, gt = set(), set()
+            pred_highest_time, gt_highest_time = 0, 0
             for tup in notes:
                 p = tup[1]
                 elements = p.notes if p.isChord else [p]
@@ -67,8 +69,8 @@ class Inference:
             gt_duration = sum(end - start for _, start, end in gt)
             
             # Compute the total true negative area
-            gt_total_area = gt_highest_time * vocab.vocabulary['pitch'][0].min_max_values[1]
-            pred_total_area = pred_highest_time * vocab.vocabulary['pitch'][0].min_max_values[1]
+            gt_total_area = gt_highest_time * self.vocab.vocabulary['pitch'][0].min_max_values[1]
+            pred_total_area = pred_highest_time * self.vocab.vocabulary['pitch'][0].min_max_values[1]
             total_area = max(gt_total_area, pred_total_area)
             
             # Compute the intersection
@@ -99,7 +101,7 @@ class Inference:
         # Append the statistics to a TSR file
         stat_path = os.path.join(self.output_dir, "statistics")
         with open(f"{stat_path}.txt", "a") as file:
-            file.write(f"{iou:.2f}\t{sens:.2f}\t{fnr:.2f}\t{fpr:.2f}\t{spec:.2f}\n")
+            file.write(f"{self.song_name}\t{iou:.2f}\t{sens:.2f}\t{fnr:.2f}\t{fpr:.2f}\t{spec:.2f}\n")
         
         plt.ioff()
         _, ax = plt.subplots()
@@ -148,25 +150,40 @@ class Inference:
 
         # Adjust these values to move the position of the text box
         x_position = 1.05
-        y_position = 0.5
+        y_position = 0.7
 
         # Add text box
         ax.text(x_position, y_position, stats_text, transform=ax.transAxes, fontsize=12,
-                verticalalignment='top', bbox=props)
+            verticalalignment='top', bbox=props)
         
+        # Add legends to the note colors
+        # Shrink current axis's height by 10% on the bottom
+        box = ax.get_position()
+        ax.set_position([box.x0, box.y0 + box.height * 0.1,
+                        box.width, box.height * 0.9])
+
+        # Put a legend below current axis
+        ax.plot([], [], color='blue', label='Ground Truth', alpha=alpha)
+        ax.plot([], [], color='red', label='Prediction', alpha=alpha)
+        ax.plot([], [], color='black', label='Perfect Prediction', alpha=alpha)
+        ax.legend(loc='upper left', bbox_to_anchor=(1.03, 1),
+                fancybox=True)
+
         # Save the image
         save_dir = os.path.join(self.output_dir, "piano_roll")
         os.makedirs(save_dir, exist_ok=True)
+        plt.tight_layout()
         plt.savefig(os.path.join(save_dir, self.song_name), bbox_inches='tight')
         plt.close()
 
-    def test_preprocessing(self, train_val_test: list[str] = ['train', 'val', 'test']) -> None:
+    def test_preprocessing(self, train_val_test: list[str] = ['train', 'val', 'test'], preproc_to_overlap = False) -> None:
         
         for i in train_val_test:              
             df = pd.read_csv(os.path.join(self.data_dir, i, 'labels.csv'))
             songs = pd.unique(df['song_name'])
             
             for song_name in songs:
+                self.song_name = song_name
             
                 df_song = df[df['song_name'] == song_name] # get all segments of the song
                 
@@ -179,9 +196,24 @@ class Inference:
                     labels = json.loads(row['labels'])
                     events = self.vocab.translate_sequence_token_to_events(labels)
                     sequence_events.extend(events)
+
+                output_dir = os.path.join(self.output_dir, song_name) if not preproc_to_overlap else None
+                pred_score = self.translate_events_to_sheet_music(sequence_events, output_dir)
                 
-                output_dir = os.path.join(self.output_dir, song_name)
-                self.translate_events_to_sheet_music(sequence_events, output_dir)
+                # Save the correct tokens to overlap without needing to model predict
+                if preproc_to_overlap:
+                    save_dir = os.path.join(self.output_dir, "seq_predictions")
+                    os.makedirs(save_dir, exist_ok = True)
+                    np.save(os.path.join(save_dir, song_name), sequence_events)
+                    
+                    # Load the ground truth xml
+                    gt = self.preprocess_ground_truth(song_name)
+                    
+                    # Update the song name
+                    self.song_name = song_name
+                    
+                    if pred_score is not None:
+                        inference.overlap_gt_and_pred(gt, pred_score)
             
     def inference(self, init_bpm: int, saved_seq: bool = False, just_save_seq: bool = False) -> stream.Score:
         
@@ -276,16 +308,17 @@ class Inference:
                 
                 # Insert the elements into the overlap stream
                 for gt_e in gt_elements:
-                    gt_e.element.offset = gt_time
-                    gt_e.element.style.color = cm_colors["GT"]
+                    gt_event = gt_e.element
+                    gt_event.offset = gt_time
+                    gt_event.style.color = cm_colors["GT"]
                     
-                    if isinstance(gt_e.element, tempo.MetronomeMark):
-                        t_staff.insert(gt_time, gt_e.element)
-                    elif isinstance(gt_e.element, meter.TimeSignature):
-                        t_staff.insert(gt_time, gt_e.element)
-                        b_staff.insert(gt_time, gt_e.element)
-                    elif isinstance(gt_e.element, note.NotRest):
-                        self._assign_and_insert_into_staff(gt_e.element, t_staff, b_staff)
+                    if isinstance(gt_event, tempo.MetronomeMark):
+                        t_staff.insert(gt_event.offset, gt_event)
+                    elif isinstance(gt_event, meter.TimeSignature):
+                        t_staff.insert(gt_event.offset, gt_event)
+                        b_staff.insert(gt_event.offset, gt_event)
+                    elif isinstance(gt_event, note.NotRest):
+                        self._assign_and_insert_into_staff(gt_event, t_staff, b_staff)
                     
                 # Update the ground truth time to see if we missed anything
                 gt_time = gt_tree.getPositionAfter(gt_time)
@@ -304,7 +337,7 @@ class Inference:
                 if isinstance(event, meter.TimeSignature):
                     if event.offset in processed_time_sig_offsets:
                         continue
-                    processed_time_sig_offsets.add(time_point)
+                    processed_time_sig_offsets.add(event.offset)
                 
                 # We need to prepare the mask for the event in case there are no gt's
                 if isinstance(event, note.NotRest):
@@ -328,7 +361,9 @@ class Inference:
                     # Update the matches of the event and gt event
                     if isinstance(gt_event, note.NotRest):
                         matched_gt_notes = np.any(np.all(equal, axis = 2), axis = 1)
-                        not_rest_mask[gt_event] = np.full(len(gt_event.pitches), False)
+                        
+                        if gt_event not in not_rest_mask.keys():
+                            not_rest_mask[gt_event] = np.full(len(gt_event.pitches), False)
                         not_rest_mask[gt_event][matched_gt_notes] = True
 
                         matched_event_notes = np.any(np.all(equal, axis = 2), axis = 0)
@@ -352,13 +387,13 @@ class Inference:
                         if not mask:
                             e.style.color = cm_colors["PRED"]
                         
-                    assert e.offset == time_point
+                    assert np.isclose(float(e.offset), time_point)
                 
                 if isinstance(event, tempo.MetronomeMark):
-                    t_staff.insert(time_point, event)
+                    t_staff.insert(event.offset, event)
                 elif isinstance(event, meter.TimeSignature):
-                    t_staff.insert(time_point, event)
-                    b_staff.insert(time_point, event)      
+                    t_staff.insert(event.offset, event)
+                    b_staff.insert(event.offset, event)      
                 
             # Insert any notes in a gt chord that might have been missed (false negatives)
             if not_rest_mask:
@@ -370,10 +405,10 @@ class Inference:
                             trimmed_gt.append(n)
                     
                     trimmed_gt = chord.Chord(trimmed_gt)
-                    trimmed_gt.offset = time_point
+                    trimmed_gt.offset = c.offset
                     trimmed_gt.quarterLength = c.quarterLength
-                    assert c.offset == time_point
-                    assert trimmed_gt.offset == time_point
+                    assert np.isclose(float(c.offset), time_point)
+                    assert np.isclose(float(trimmed_gt.offset), time_point)
                     # Insert into the overlap stream
                     self._assign_and_insert_into_staff(trimmed_gt, t_staff, b_staff)
             
@@ -393,13 +428,13 @@ class Inference:
                 if isinstance(e, note.NotRest):
                     self._assign_and_insert_into_staff(event, t_staff, b_staff)             
                 elif isinstance(event, tempo.MetronomeMark):
-                    t_staff.insert(gt_time, event)
+                    t_staff.insert(event.offset, event)
                 elif isinstance(event, meter.TimeSignature):
                     if event.offset in processed_time_sig_offsets:
                         continue
-                    processed_time_sig_offsets.add(time_point)
-                    t_staff.insert(gt_time, event)
-                    b_staff.insert(gt_time, event)  
+                    processed_time_sig_offsets.add(event.offset)
+                    t_staff.insert(event.offset, event)
+                    b_staff.insert(event.offset, event)  
                     
             gt_time = gt_tree.getPositionAfter(gt_time)
                 
@@ -436,8 +471,8 @@ class Inference:
         proposed_key = overlap_score.analyze('key')
         ks = key.KeySignature(proposed_key.sharps)
         
-        overlap_score = overlap_score.makeAccidentals(alteredPitches = ks.alteredPitches, 
-                                    overrideStatus = True)
+        overlap_score.makeAccidentals(alteredPitches = ks.alteredPitches, 
+                                    overrideStatus = True, inPlace = True)
         
         overlap_score.parts[0].keySignature = ks
         overlap_score.parts[1].keySignature = ks
@@ -537,9 +572,9 @@ class Inference:
                     continue
 
                 # If a new time signature is detected
-                new_time_signature_detected = ((beats_per_bar != measure_durations[np.max([1, i])]) or (bar_dur != beats_per_bar))
+                new_time_signature_detected = ((beats_per_bar != measure_durations[i]) or (bar_dur != beats_per_bar))
                 if new_time_signature_detected:
-                    beats_per_bar = measure_durations[np.max([1, i])]
+                    beats_per_bar = measure_durations[i]
                     
                     multiplier = 1
                     while (beats_per_bar * multiplier) % 1 != 0:
@@ -630,25 +665,50 @@ class Inference:
         # Only update the pitches if the key signature includes flats
         # if proposed_key.sharps < 0:
         #     score = _update_pitches(score, proposed_key)
-        score = score.makeAccidentals(alteredPitches = ks.alteredPitches, 
-                                    overrideStatus = True)
+        score.makeAccidentals(alteredPitches = ks.alteredPitches, 
+                                    overrideStatus = True, inPlace = True)
         
         # Add the key signature
         score.parts[0].keySignature = ks
         score.parts[1].keySignature = ks
 
-        print("We can show the score and write it to a file")
         # score.show()
         score.insert(0, metadata.Metadata())
         score.metadata.title = self.song_name
         score.metadata.composer = "Arr: AMT Model"
         
-        score.write('musicxml', fp=f'{output_dir}.xml')
+        if output_dir is not None:
+            print("We can show the score and write it to a file")
+            score.write('musicxml', fp=f'{output_dir}.xml')
 
-        # Adjust the voice numbers (MuseScore does not allow 0-numbered voices)
-        self._adjust_voice_numbers(f'{output_dir}.xml')
+            # Adjust the voice numbers (MuseScore does not allow 0-numbered voices)
+            self._adjust_voice_numbers(f'{output_dir}.xml')
         
         return score
+
+    def preprocess_ground_truth(self, song_name):
+        
+        # Find the path to the gt file
+        song_wo_ext = os.path.join(os.path.dirname(self.audio_dir), song_name)
+        avail_paths = np.array([os.path.exists(f"{song_wo_ext}.{ext}") for ext in self.pre_config['audio_file_extension']])
+        if not np.any(avail_paths):
+            raise FileNotFoundError(f"{song_name} could not be found")
+        avail_ext = np.asarray(self.pre_config['audio_file_extension'])[avail_paths][0]
+        song_path = f"{song_wo_ext}.{avail_ext}"
+        
+        # Load the ground truth xml
+        gt_song = MuseScore(song_path, self.pre_config)
+        df_gt = gt_song.preprocess()
+        
+        # Create a sheet based off of the ground truths
+        sequence_events = []
+        for _, row in df_gt.iterrows():
+            events = self.vocab.translate_sequence_token_to_events(row['labels'])
+            sequence_events.extend(events)
+        
+        gt_score = self.translate_events_to_sheet_music(sequence_events, output_dir = None)   
+        
+        return gt_score
 
     def _assign_and_insert_into_staff(self, no: note.Note | chord.Chord, t_staff: stream.Stream, b_staff: stream.Stream) -> None:
         # Evenly distribute between treble and bass cleff - could be optimized
@@ -1142,9 +1202,10 @@ if __name__ == '__main__':
     new_song_name = "sans"
     
     # ----------------------------- Choose the type of inference ----------------------------- #
-    new_song = True
+    new_song = False
     preprocess = True
-    overlap = True
+    overlap = False
+    preproc_to_overlap = True
     
     # --------------------------------- Collect directories -------------------------------- #
     output_dir = "inference_songs"
@@ -1174,24 +1235,11 @@ if __name__ == '__main__':
         
     if preprocess:
         print("Testing if the preprocessing works")
-        inference.test_preprocessing()
-        
+        inference.test_preprocessing(preproc_to_overlap = preproc_to_overlap)
+     
     if overlap:
-        print("Performing overlap of the ground truth score and the predicted")
-        all_paths = [[os.path.exists(os.path.join(aud_path, f"{new_song_name}.{ext}")) for ext in configs['preprocess']['score_file_extensions']] for aud_path in audio_dirs]
-        avail_paths = np.any(all_paths, axis = 1)
-        if not np.any(avail_paths):
-            raise FileNotFoundError(f"{new_song_name} could not be found")
-        avail_ext = np.asarray(configs['preprocess']['score_file_extensions'])[np.any(all_paths, axis = 0)][0]
-        song_path = os.path.join(audio_dirs[avail_paths][0], f"{new_song_name}.{avail_ext}")
-        
-        # Load the ground truth xml
-        try:
-            gt = converter.parse(song_path)
-            gt = gt.makeRests(timeRangeFromBarDuration=True) # Some scores have missing rests and that will completely mess up the expansion
-            gt = gt.expandRepeats()
-        except:
-            raise Exception(f"The ground truth file of {new_song_name} could not be succesfully processed")
+
+        gt = inference.preprocess_ground_truth(new_song_name)
         
         # Get predicted score
         init_bpm = gt.metronomeMarkBoundaries()[0][-1].getQuarterBPM()

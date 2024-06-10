@@ -1,3 +1,4 @@
+import json
 import numpy as np
 import os
 import pandas as pd
@@ -5,8 +6,6 @@ import yaml
 
 from test_inference import Inference
 from utils.vocabularies import Vocabulary
-
-from music21 import converter
 
 # --------------------------------- Collect configs -------------------------------- #
 with open("Transformer/configs/preprocess_config.yaml", 'r') as f:
@@ -44,6 +43,11 @@ dirs = {"out": output_dir,
 df = pd.read_csv(os.path.join(data_dir, 'test', 'labels.csv'))
 songs = pd.unique(df['song_name'])
 
+# Delete statistics file if it exists
+stat_file = os.path.join(dirs['out'], "statistics.txt")
+if os.path.exists(stat_file):
+    os.remove(stat_file)
+
 for song in songs:
     
     # Find the path to the audio of the song
@@ -61,22 +65,9 @@ for song in songs:
                           song_name = song, model_name = model_name)
     
     
-    # Find the path to the sheet music of the song
-    all_paths = [[os.path.exists(os.path.join(aud_path, f"{song}.{ext}")) for ext in configs['preprocess']['score_file_extensions']] for aud_path in audio_dirs]
-    avail_paths = np.any(all_paths, axis = 1)
-    if not np.any(avail_paths):
-        raise FileNotFoundError(f"{song} could not be found")
-    avail_ext = np.asarray(configs['preprocess']['score_file_extensions'])[np.any(all_paths, axis = 0)][0]
-    song_path = os.path.join(audio_dirs[avail_paths][0], f"{song}.{avail_ext}")
+    # Get the ground truth score
+    gt = inference.preprocess_ground_truth(song)
     
-    # Load the ground truth xml
-    try:
-        gt = converter.parse(song_path)
-        gt = gt.makeRests(timeRangeFromBarDuration=True) # Some scores have missing rests and that will completely mess up the expansion
-        gt = gt.expandRepeats()
-    except:
-        raise Exception(f"The ground truth file of {song} could not be succesfully processed")
-
     # Retrieve initial bpm
     init_bpm = gt.metronomeMarkBoundaries()[0][-1].getQuarterBPM()
     saved_seq = os.path.exists(os.path.join(output_dir, "seq_predictions", f"{song}.npy"))
@@ -87,3 +78,18 @@ for song in songs:
     # ------------------------------- Overlap ground truth with prediction score ------------------------------------ #
     if pred_score is not None:
         inference.overlap_gt_and_pred(gt, pred_score)
+
+# ------------------------------- Compute statistics ------------------------------------ #
+# Load the stat txt file as a dataframe
+stats = ["iou", "sens", "fnr", "fpr", "spec"]
+df_stat = pd.read_csv(stat_file, delimiter='\t', names = stats, index_col = 0)
+
+# Calculate confidence interval
+means = df_stat.mean(axis = 0)
+sems = df_stat.std(axis = 0) / np.sqrt(df_stat.shape[0])
+cis = {col: [means.iloc[i] - 1.96 * sems.iloc[i], means.iloc[i] + 1.96 * sems.iloc[i]] for i, col in enumerate(df_stat.columns)}
+
+# Write to json file
+cis_file = os.path.join(dirs['out'], "cis.json")
+with open(cis_file, 'w') as f:
+    json.dump(cis, f, indent = 2)
