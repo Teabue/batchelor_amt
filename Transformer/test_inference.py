@@ -5,6 +5,7 @@ import matplotlib.ticker as ticker
 import numpy as np
 import os
 import pandas as pd
+pd.options.mode.chained_assignment = None  # default='warn'
 import torch
 import yaml
 import xml.etree.ElementTree as ET
@@ -282,6 +283,10 @@ class Inference:
         gt_score = stream.tools.removeDuplicates(gt_score)
         # pred_score = stream.tools.removeDuplicates(pred_score)
         
+        # Flatten streams
+        gt_score = gt_score.flatten()
+        pred_score = pred_score.flatten()
+        
         # Convert scores to a time series with only the available predicted elements
         gt_tree = gt_score.asTimespans(classList=(note.Note, chord.Chord, meter.TimeSignature, tempo.MetronomeMark))
         pred_tree = pred_score.asTimespans(classList=(note.Note, chord.Chord, meter.TimeSignature, tempo.MetronomeMark))
@@ -308,7 +313,7 @@ class Inference:
                 
                 # Insert the elements into the overlap stream
                 for gt_e in gt_elements:
-                    gt_event = gt_e.element
+                    gt_event = gt_score.getElementById(gt_e.element.id)
                     gt_event.offset = gt_time
                     gt_event.style.color = cm_colors["GT"]
                     
@@ -330,8 +335,8 @@ class Inference:
             not_rest_mask = {} # Mask for events in the gt stream
             for e in pred_tree.elementsStartingAt(time_point):
                 pred_mask = {}
-                event = e.element
-                event.offset = time_point
+                event = pred_score.getElementById(e.element.id)
+                event.offset = e.offset
                 
                 # If the event is a time signature and its offset has already been processed, skip it
                 if isinstance(event, meter.TimeSignature):
@@ -347,8 +352,8 @@ class Inference:
                     
                 # Go through the ground truth elements at the current onset
                 for gt_e in gt_tree.elementsStartingAt(time_point):
-                    gt_event = gt_e.element
-                    gt_event.offset = time_point
+                    gt_event = gt_score.getElementById(gt_e.element.id)
+                    gt_event.offset = gt_e.offset
                     
                     if (gt_event.classes[0] != event.classes[0]):
                         # If one is a chord and the other is a note for example, it's fine
@@ -421,7 +426,7 @@ class Inference:
         gt_time = gt_tree.getPositionAfter(time_point)
         while gt_time is not None:
             for e in gt_tree.elementsStartingAt(gt_time):
-                event = e.element
+                event = gt_score.getElementById(e.element.id)
                 event.offset = gt_time
                 event.style.color = cm_colors["GT"]
                 
@@ -577,7 +582,7 @@ class Inference:
                     beats_per_bar = measure_durations[i]
                     
                     multiplier = 1
-                    while (beats_per_bar * multiplier) % 1 != 0:
+                    while (beats_per_bar * 2**(multiplier - 1)) % 1 != 0:
                         multiplier += 1
                         
                         # We are beyond 64 notes. NOTE: This is yet to happen and the consequences are unknown
@@ -587,7 +592,7 @@ class Inference:
                             beats_per_bar = 4
                             multiplier = 1
                     
-                    nominator = int(beats_per_bar * multiplier)
+                    nominator = int(beats_per_bar * 2**(multiplier - 1))
                     denominator = 2**(multiplier + 1)
                     
                     ts = meter.TimeSignature(f'{nominator}/{denominator}')
@@ -1112,8 +1117,12 @@ class Inference:
                 # If the et_switch is one, we don't want to save the note or offset it prematurily
                 if not et_switch and onset_switch:
                     if note_ in notes_to_concat.keys():
-                        print(f"Note ({note_}) is set to onset again before offset!")
-                        notes_to_concat[note_].append(beat)
+                        if beat in notes_to_concat[note_]:
+                            print("The model wants to offset the same note an onset already occupied. We skip it")
+                            continue
+                        else:
+                            print(f"Note ({note_}) is set to onset again before offset!")
+                            notes_to_concat[note_].append(beat)
                     else:
                         # Save the note with the corresponding onset time
                         notes_to_concat[note_] = [beat]

@@ -18,12 +18,12 @@ n_mels: 128 # number of mel bands to generate
 # -------------------------------- Directories ------------------------------- #
 # List of dataset directories
 data_dirs:
-  - "/Users/helenakeitum/Desktop/test_data"
+  - "/Users/helenakeitum/Desktop/bachelor_musescore/songs_fine"
 
 audio_file_extension: ['wav', 'mp3']
 score_file_extensions: ['xml', 'mxl']
 midi_file_extensions: ['mid', 'midi']
-output_dir: 'preprocessed_data/05-05-24' # '/work3/s214629/preprocessed_data_best'  # Preprocessed data will be saved to output_dir/spectrograms/ and output_dir/labels/
+output_dir: 'preprocessed_data/10-06-24' # '/work3/s214629/preprocessed_data_best'  # Preprocessed data will be saved to output_dir/spectrograms/ and output_dir/labels/
 
 # ------------------------------ Miscellaneous ------------------------------ #
 num_workers: 1
