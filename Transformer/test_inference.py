@@ -70,8 +70,8 @@ class Inference:
             gt_duration = sum(end - start for _, start, end in gt)
             
             # Compute the total true negative area
-            gt_total_area = gt_highest_time * self.vocab.vocabulary['pitch'][0].min_max_values[1]
-            pred_total_area = pred_highest_time * self.vocab.vocabulary['pitch'][0].min_max_values[1]
+            gt_total_area = gt_highest_time * len(np.arange(self.vocab.vocabulary['pitch'][0].min_max_values[0], self.vocab.vocabulary['pitch'][0].min_max_values[1] + 1))
+            pred_total_area = pred_highest_time * len(np.arange(self.vocab.vocabulary['pitch'][0].min_max_values[0], self.vocab.vocabulary['pitch'][0].min_max_values[1] + 1))
             total_area = max(gt_total_area, pred_total_area)
             
             # Compute the intersection
@@ -319,10 +319,12 @@ class Inference:
                     
                     if isinstance(gt_event, tempo.MetronomeMark):
                         t_staff.insert(gt_event.offset, gt_event)
-                    elif isinstance(gt_event, meter.TimeSignature):
-                        t_staff.insert(gt_event.offset, gt_event)
-                        b_staff.insert(gt_event.offset, gt_event)
+                    # elif isinstance(gt_event, meter.TimeSignature):
+                    #     t_staff.insert(gt_event.offset, gt_event)
+                    #     b_staff.insert(gt_event.offset, gt_event)
                     elif isinstance(gt_event, note.NotRest):
+                        for idx, n in enumerate(gt_event if gt_event.isChord else [gt_event]):
+                            n.style.color = cm_colors["PRED"]
                         self._assign_and_insert_into_staff(gt_event, t_staff, b_staff)
                     
                 # Update the ground truth time to see if we missed anything
@@ -423,14 +425,17 @@ class Inference:
                 gt_time = time_point + 1
         
         # If there is more gt stream, insert the rest as false negatives
-        gt_time = gt_tree.getPositionAfter(time_point)
+        gt_time = gt_tree.getPositionAfter(time_point)    
         while gt_time is not None:
             for e in gt_tree.elementsStartingAt(gt_time):
                 event = gt_score.getElementById(e.element.id)
                 event.offset = gt_time
                 event.style.color = cm_colors["GT"]
                 
-                if isinstance(e, note.NotRest):
+                if isinstance(event, note.NotRest):
+                    for idx, n in enumerate(event if event.isChord else [event]):
+                        n.style.color = cm_colors["GT"]
+                        
                     self._assign_and_insert_into_staff(event, t_staff, b_staff)             
                 elif isinstance(event, tempo.MetronomeMark):
                     t_staff.insert(event.offset, event)
@@ -454,14 +459,14 @@ class Inference:
                            refStreamOrTimeRange = ref_stream if ref_stream == b_staff else None,
                            inPlace = True)
         t_staff.makeTies(inPlace = True)
-        t_staff.makeRests(fillGaps = True, inPlace = True, timeRangeFromBarDuration = True)
+        t_staff = t_staff.makeRests(fillGaps = True, inPlace = False, timeRangeFromBarDuration = True)
         t_staff.measure(-1).rightBarline = bar.Barline('final')
         
         self._makeMeasures(b_staff,
                            refStreamOrTimeRange = ref_stream if ref_stream == t_staff else None,
                            inPlace = True)
         b_staff.makeTies(inPlace = True)
-        b_staff.makeRests(fillGaps = True, inPlace = True, timeRangeFromBarDuration = True)
+        b_staff = b_staff.makeRests(fillGaps = True, inPlace = False, timeRangeFromBarDuration = True)
         b_staff.measure(-1).rightBarline = bar.Barline('final')
         
         overlap_score = stream.Score(id = "overlap")
@@ -644,14 +649,14 @@ class Inference:
                            refStreamOrTimeRange = ref_stream if ref_stream == bass_staff else None,
                            inPlace = True)
         treble_staff.makeTies(inPlace = True)
-        treble_staff.makeRests(fillGaps = True, inPlace = True, timeRangeFromBarDuration = True)
+        treble_staff = treble_staff.makeRests(fillGaps = True, inPlace = False, timeRangeFromBarDuration = True)
         treble_staff.measure(-1).rightBarline = bar.Barline('final')
         
         self._makeMeasures(bass_staff, 
                            refStreamOrTimeRange = ref_stream if ref_stream == treble_staff else None,
                            inPlace = True)
         bass_staff.makeTies(inPlace = True)
-        bass_staff.makeRests(fillGaps = True, inPlace = True, timeRangeFromBarDuration = True)
+        bass_staff = bass_staff.makeRests(fillGaps = True, inPlace = False, timeRangeFromBarDuration = True)
         bass_staff.measure(-1).rightBarline = bar.Barline('final')
         
         # Add the staffs to the score
@@ -1208,13 +1213,13 @@ if __name__ == '__main__':
     model_name = '29-05-24_musescore.pth' 
     
     # ----------------------------- Choose song ----------------------------- #
-    new_song_name = "sans"
+    new_song_name = "Giornos_Theme"
     
     # ----------------------------- Choose the type of inference ----------------------------- #
     new_song = False
-    preprocess = True
-    overlap = False
-    preproc_to_overlap = True
+    preprocess = False
+    overlap = True
+    preproc_to_overlap = False
     
     # --------------------------------- Collect directories -------------------------------- #
     output_dir = "inference_songs"
