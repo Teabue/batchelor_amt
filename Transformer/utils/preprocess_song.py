@@ -222,23 +222,23 @@ class MuseScore(Song):
         else:
             raise FileNotFoundError(f"No score found with extensions {self.config['score_file_extensions']} for song {self.song_name}")
         
-        # for song_extension in self.config['midi_file_extensions']:
-        #     song_path_with_extension = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
-        #     if os.path.isfile(song_path_with_extension):
-        #         midi_path = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
-        #         self.midi = mido.MidiFile(midi_path)
-        #         break
-        # else:
-        #     raise FileNotFoundError(f"No midi found with extensions {self.config['midi_file_extensions']} for song {self.song_name}")
+        self.expansion_succes = False
+        for parts in self.score.parts:
+            exp = repeat.Expander(parts)
+            expandable = exp.isExpandable()
+            if not expandable:
+                print(f"The song {self.song_name} is not expandable")
+                break
         
-        try:
-            self.score = self.score.makeRests(timeRangeFromBarDuration=True) # Some scores have missing rests and that will completely mess up the expansion
+        voltas = list(self.score.flatten().getElementsByClass('RepeatBracket'))
+        if voltas:
+            print(f"The song {self.song_name} has voltas")
+        
+        if expandable and not voltas:
+            self.score = self.score.makeRests(fillGaps = True, inPlace = False, timeRangeFromBarDuration = True) # Some scores have missing rests and that will completely mess up the expansion
             self.score = self.score.expandRepeats()
             self.contains_fermata, self.total_duration = fermata_check(self.score)
             self.expansion_succes = True
-        except Exception:
-            print(f"----------------------Could not expand repeats for {self.song_name} due to notation mistakes. It will be removed from the dataset >:(----------------------")
-            self.expansion_succes = False
             
 
     def compute_onset_offset_beats(self):
