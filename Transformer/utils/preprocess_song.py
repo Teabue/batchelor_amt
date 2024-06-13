@@ -226,7 +226,7 @@ class MuseScore(Song):
         for parts in self.score.parts:
             exp = repeat.Expander(parts)
             expandable = exp.isExpandable()
-            if not expandable:
+            if (expandable is not None) and (not expandable):
                 print(f"The song {self.song_name} is not expandable")
                 break
         
@@ -234,7 +234,7 @@ class MuseScore(Song):
         if voltas:
             print(f"The song {self.song_name} has voltas")
         
-        if expandable and not voltas:
+        if (expandable is True or expandable is None) and not voltas:
             self.score = self.score.makeRests(fillGaps = True, inPlace = False, timeRangeFromBarDuration = True) # Some scores have missing rests and that will completely mess up the expansion
             self.score = self.score.expandRepeats()
             self.contains_fermata, self.total_duration = fermata_check(self.score)
