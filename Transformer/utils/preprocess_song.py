@@ -37,9 +37,6 @@ class Song:
         """
         x, sr = librosa.load(self.song_path, sr=self.config['sr'])
         
-        if save_path is None:
-            save_path = os.path.join(self.config['output_dir'], 'spectrograms', f'{self.song_name}.npy')
-        
         if self.config['preprocess_method'] == 'cqt':
             cqt = librosa.cqt(y=x, sr=sr, hop_length=self.config['hop_length'], n_bins=self.config['n_bins'])
             cqt = librosa.amplitude_to_db(np.abs(cqt))
@@ -55,7 +52,9 @@ class Song:
         else:
             raise ValueError("Invalid choice of preprocess method.")
         
-        np.save(save_path, spectrogram)
+        if save_path is not None:
+            np.save(save_path, spectrogram)
+            
         return spectrogram
         
     def preprocess_inference_new_song(self, spectrogram, cur_frame: int, bpm: int = 120) -> torch.Tensor:
@@ -66,11 +65,13 @@ class Song:
         min_size = self.config['min_beats']
         max_size = self.config['max_beats'] if beats_left > self.config['max_beats'] else beats_left
         
-        if max_size >= min_size:
+        if 0 < np.round(beats_left - min_size) < max_size:
+            beats_in_seq = np.round(beats_left - min_size)
+        elif max_size >= min_size:
             beats_in_seq = np.random.randint(min_size, max_size + 1)
         else:
             new_frame = spectrogram.shape[1]
-            return torch.from_numpy(spectrogram)[:, cur_frame:]
+            return torch.from_numpy(spectrogram)[:, cur_frame:], new_frame
         
         time_to_add = beats_in_seq * 60 / bpm
         new_frame = cur_frame + np.argmin(np.abs(frame_times - time_to_add))
@@ -200,7 +201,7 @@ class Maestro(Song):
             
         
     def preprocess(self) -> None:
-        spectrogram = self.compute_spectrogram()
+        spectrogram = self.compute_spectrogram(save_path = os.path.join(self.config['output_dir'], 'spectrograms', f'{self.song_name}.npy'))
         df_onset_offset = self.compute_onset_offset_times()
         df_labels = self.compute_labels_and_segments(df_onset_offset, spectrogram)
         return df_labels
@@ -221,25 +222,23 @@ class MuseScore(Song):
         else:
             raise FileNotFoundError(f"No score found with extensions {self.config['score_file_extensions']} for song {self.song_name}")
         
-        # for song_extension in self.config['midi_file_extensions']:
-        #     song_path_with_extension = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
-        #     if os.path.isfile(song_path_with_extension):
-        #         midi_path = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
-        #         self.midi = mido.MidiFile(midi_path)
-        #         break
-        # else:
-        #     raise FileNotFoundError(f"No midi found with extensions {self.config['midi_file_extensions']} for song {self.song_name}")
+        self.expansion_succes = False
+        for parts in self.score.parts:
+            exp = repeat.Expander(parts)
+            expandable = exp.isExpandable()
+            if (expandable is not None) and (not expandable):
+                print(f"The song {self.song_name} is not expandable")
+                break
         
-        try:
-            self.score = self.score.makeRests(timeRangeFromBarDuration=True) # Some scores have missing rests and that will completely mess up the expansion
+        voltas = list(self.score.flatten().getElementsByClass('RepeatBracket'))
+        if voltas:
+            print(f"The song {self.song_name} has voltas")
+        
+        if (expandable is True or expandable is None) and not voltas:
+            self.score = self.score.makeRests(fillGaps = True, inPlace = False, timeRangeFromBarDuration = True) # Some scores have missing rests and that will completely mess up the expansion
             self.score = self.score.expandRepeats()
             self.contains_fermata, self.total_duration = fermata_check(self.score)
             self.expansion_succes = True
-            self.pickup_measure = False
-            self.compensation_measure = False
-        except Exception:
-            print(f"----------------------Could not expand repeats for {self.song_name} due to notation mistakes. It will be removed from the dataset >:(----------------------")
-            self.expansion_succes = False
             
 
     def compute_onset_offset_beats(self):
@@ -255,15 +254,12 @@ class MuseScore(Song):
         for measure in self.score.parts[0].getElementsByClass(stream.Measure):
             # Check if it's a pickup measure (anacrusis)
             if measure.paddingLeft != 0:
-                self.pickup_measure = True
                 continue
-            if measure.paddingRight != 0:
-                self.compensation_measure = True
-                
+            
             downbeat = measure.offset
             df = pd.concat([df, pd.DataFrame([{'pitch': -1, 'onset': downbeat, 'offset': downbeat}])], ignore_index=True)
         # Add the downbeat marking the end of the score
-        df = pd.concat([df, pd.DataFrame([{'pitch': -1, 'onset': self.score.highestTime, 'offset': self.score.highestTime}])], ignore_index=True)
+        # df = pd.concat([df, pd.DataFrame([{'pitch': -1, 'onset': self.score.highestTime, 'offset': self.score.highestTime}])], ignore_index=True)
         
         # ---------------------- Add notes and chords ---------------------- #  
         for element in self.score.flatten().notes:
@@ -362,8 +358,13 @@ class MuseScore(Song):
         cur_beat = 0
         prev_beat = None
         while max_size >= min_size:
-            # Generate a random size between min_size and max_size
-            beats_in_seq = np.random.randint(min_size, max_size + 1)
+            
+            if 0 < np.round(total_duration - min_size) < max_size:
+                # Makes sures that we cut the entire spectrogram by making max = min
+                beats_in_seq = np.round(total_duration - min_size)
+            else:
+                # Generate a random size between min_size and max_size
+                beats_in_seq = np.random.randint(min_size, max_size + 1)
             
             # Find the closest frame in the spectrogram and return its index
             frame = np.argmin(np.abs(frame_beats - (cur_beat + beats_in_seq)))
@@ -373,7 +374,7 @@ class MuseScore(Song):
             
             # Gradually decrease the max_size to cut up as much as possible of the spectrogram
             if total_duration < max_size:
-                max_size = int(total_duration)
+                max_size = np.round(total_duration)
             
             # Add the frame to the indices
             indices.extend([frame])
@@ -381,8 +382,10 @@ class MuseScore(Song):
                 raise ValueError(f"Something is wrong with the XML song so that sequnce_beats would get repeated beats looping into infinity and beyond.")
             
             sequence_beats.extend([np.round(cur_beat)]) # NOTE: This will give a little round-off error as opposed to looking up the frame_beat. However, it's necessary to preserve the grid-structure
-            prev_beat = cur_beat
-            
+        
+        if sequence_beats[-1] != self.total_duration:
+            print(f"----- {self.song_name} doesn't align properly with beats and slicing? -----")
+        
         if verbose:
                 
             # Plot the spectrogram along with the beats and cuts
@@ -526,7 +529,7 @@ class MuseScore(Song):
         return merged
             
     def preprocess(self, **kwargs) -> None:
-        spectrogram = self.compute_spectrogram()
+        spectrogram = self.compute_spectrogram(save_path = os.path.join(self.config['output_dir'], 'spectrograms', f'{self.song_name}.npy'))
         df_onset_offset = self.compute_onset_offset_beats()
         df_labels = self.compute_labels_and_segments(df_onset_offset, spectrogram, **kwargs)
         return df_labels
