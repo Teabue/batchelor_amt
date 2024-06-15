@@ -20,7 +20,7 @@ from utils.model import Transformer
 
 class Inference:
     def __init__(self, vocab: Vocabulary, configs: dict[str, str | None], 
-                 dirs: dict[str, str | None], song_name: str, model_name: str = None):
+                 dirs: dict[str, str | None], song_name: str, model_path: str = None):
         
         self.vocab = vocab
         
@@ -33,7 +33,7 @@ class Inference:
         self.output_dir = dirs['out']
         
         self.song_name = song_name
-        self.model_name = model_name
+        self.model_path = model_path
     
     def plot_pianoroll(self, m21_stream: stream.Score, alpha: float = 0.5) -> None:
         # Flatten the stream to handle all notes and chords
@@ -100,7 +100,8 @@ class Inference:
         iou, sens, fnr, fpr, spec = inference_stats(elements)
         
         # Append the statistics to a TSR file
-        stat_path = os.path.join(self.output_dir, "statistics")
+        fourier = self.pre_config['preprocess_method']
+        stat_path = os.path.join(self.output_dir, f"statistics-{fourier}")
         with open(f"{stat_path}.txt", "a") as file:
             file.write(f"{self.song_name}\t{iou:.2f}\t{sens:.2f}\t{fnr:.2f}\t{fpr:.2f}\t{spec:.2f}\n")
         
@@ -119,7 +120,7 @@ class Inference:
         for offset, elem in elements:
             ns = elem.notes if elem.isChord else [elem]
             for n in ns:
-                color = n.style.color if n.style.color else 'black'
+                color = n.style.color if n.style.color else 'green'
                 ax.broken_barh([(offset, elem.quarterLength)], (n.pitch.midi - 0.5, 1), facecolors=color, alpha=alpha)
         
         ax.set_xlabel('Time (quarter lengths)')
@@ -166,7 +167,7 @@ class Inference:
         # Put a legend below current axis
         ax.plot([], [], color='blue', label='Ground Truth', alpha=alpha)
         ax.plot([], [], color='red', label='Prediction', alpha=alpha)
-        ax.plot([], [], color='black', label='Perfect Prediction', alpha=alpha)
+        ax.plot([], [], color='green', label='Perfect Prediction', alpha=alpha)
         ax.legend(loc='upper left', bbox_to_anchor=(1.03, 1),
                 fancybox=True)
 
@@ -233,7 +234,7 @@ class Inference:
                                 self.train_config['num_layers'], self.train_config['d_ff'], 
                                 self.train_config['max_seq_length'], self.train_config['dropout'], device)
             
-            model.load_state_dict(torch.load(os.path.join('models', self.model_name), map_location=device))
+            model.load_state_dict(torch.load(self.model_path, map_location=device))
             model.to(device)
             model.eval()
 
@@ -277,7 +278,7 @@ class Inference:
         os.makedirs(os.path.join(self.output_dir, "overlap"), exist_ok=True)
         
         # Boolean capital letters for (pitch, onset, offset) - TTT is just default black
-        cm_colors = {"GT": "blue", "PRED": "red"}
+        cm_colors = {"GT": "blue", "PRED": "red", "PERF": "green"}
         
         # I wish I knew this function existed before...
         gt_score = stream.tools.removeDuplicates(gt_score)
@@ -324,7 +325,7 @@ class Inference:
                     #     b_staff.insert(gt_event.offset, gt_event)
                     elif isinstance(gt_event, note.NotRest):
                         for idx, n in enumerate(gt_event if gt_event.isChord else [gt_event]):
-                            n.style.color = cm_colors["PRED"]
+                            n.style.color = cm_colors["GT"]
                         self._assign_and_insert_into_staff(gt_event, t_staff, b_staff)
                     
                 # Update the ground truth time to see if we missed anything
@@ -387,12 +388,16 @@ class Inference:
                         for idx, n in enumerate(e if e.isChord else [e]):
                             if not mask[idx]:
                                 n.style.color = cm_colors["PRED"]
+                            else:
+                                n.style.color = cm_colors["PERF"]
                         
                         # Insert into the overlap stream
                         self._assign_and_insert_into_staff(e, t_staff, b_staff)
                     else:
                         if not mask:
                             e.style.color = cm_colors["PRED"]
+                        else:
+                            e.style.color = cm_colors["PERF"]
                         
                     assert np.isclose(float(e.offset), time_point)
                 
