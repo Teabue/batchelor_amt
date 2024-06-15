@@ -1,3 +1,4 @@
+import argparse
 import torch
 import tqdm
 import os
@@ -7,7 +8,7 @@ import torch.nn as nn
 from utils.model import Transformer
 from utils.data_loader_2 import TransformerDataset  
 from utils.vocabularies import VocabBeat, VocabTime
-
+from utils.train_loss import CustomLoss
 
 
 def train_model(model, 
@@ -157,18 +158,22 @@ def simple_setup(device = 'cuda',
     if data_parallelism:
         model = nn.DataParallel(model)
     model.to(device)
-    
-    criterion = nn.CrossEntropyLoss(ignore_index=0) # we ignore the padding token
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr, betas=(0.9, 0.98), eps=1e-9)
     dataset = TransformerDataset(data_dir)
     
-    return model, criterion, optimizer, dataset, tgt_vocab_size
+    return model, vocab, optimizer, dataset, tgt_vocab_size
 
 
 if __name__ == '__main__':
     ''' Run the file from the repo root folder'''
     import yaml
+    
+    parser = argparse.ArgumentParser(description='Train a model with specified loss function.')
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('--ce', action='store_const', const='crossentropy', dest='loss', help='Use cross-entropy loss for training.')
+    group.add_argument('--cl', action='store_const', const='customloss', dest='loss', help='Use custom loss for training.')
+    args = parser.parse_args()
     
     pretrained_run_path = None
     data_parallelism = False
@@ -203,7 +208,7 @@ if __name__ == '__main__':
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print('>>>>> Using device: ', DEVICE)
     
-    model, criterion, optimizer, dataset, tgt_vocab_size = simple_setup(device = DEVICE, 
+    model, vocab, optimizer, dataset, tgt_vocab_size = simple_setup(device = DEVICE, 
                                                                         data_dir = config['data_dir'], 
                                                                         lr = config['lr'], 
                                                                         n_mel_bins = config['n_mel_bins'], 
@@ -215,6 +220,13 @@ if __name__ == '__main__':
                                                                         dropout = config['dropout'],
                                                                         pretrained_run_path=pretrained_run_path,
                                                                         data_parallelism=data_parallelism)
+    
+    if args.loss == 'crossentropy':
+        criterion = nn.CrossEntropyLoss(ignore_index=0)
+    elif args.loss == 'customloss':
+        criterion = CustomLoss(vocab).compute_loss
+    else:
+        raise ValueError('Loss function not recognized')
     
     train_model(model, 
                 criterion, 

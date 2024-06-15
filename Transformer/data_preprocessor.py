@@ -1,3 +1,4 @@
+import argparse
 import multiprocessing
 import os 
 import pandas as pd
@@ -7,6 +8,8 @@ from sklearn.model_selection import train_test_split
 from itertools import cycle
 from utils.preprocess_song import Maestro, MuseScore
 import logging
+import shutil 
+from ruamel.yaml import YAML
 
 """
 All of this is done on the cpu :^D
@@ -125,11 +128,35 @@ class DataPreprocessor:
 
 if __name__ == '__main__':
     """ Run the file from the repo root folder"""
-    import yaml
-    import shutil 
+    
+    parser = argparse.ArgumentParser(description="Update preprocess method in config.")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('--stft', action='store_true', help="Use the Short Time Fourier Transform preprocessing method.")
+    group.add_argument('--cqt', action='store_true', help="Use the Constant-Q Transform preprocessing method.")
+    group.add_argument('--logmel', action='store_true', help="Use the log Mel spectrogram preprocessing method.")
+    args = parser.parse_args()
+        
+    # Write the updated configs back to the YAML file
+    y = YAML()
+    y.preserve_quotes = True
+    y.indent(mapping=2, sequence=4, offset=2)
+    
     # Load the YAML file
     with open('Transformer/configs/preprocess_config.yaml', 'r') as f:
-        configs = yaml.safe_load(f)
+        configs = y.load(f)
+    
+    # Update preprocess_method based on the argument provided
+    if args.stft:
+        configs['preprocess_method'] = 'stft'
+    elif args.cqt:
+        configs['preprocess_method'] = 'cqt'
+    elif args.logmel:
+        configs['preprocess_method'] = 'logmel'
+    else:
+        raise ValueError("Invalid fourier argument")
+
+    with open('Transformer/configs/preprocess_config.yaml', 'w') as f:
+        y.dump(configs, f)
     
     # Copy over the configs used for preprocessing 
     os.makedirs(configs['output_dir'], exist_ok=True)
@@ -137,21 +164,18 @@ if __name__ == '__main__':
     
     # shutil.copy('Transformer/configs/vocab_config.yaml', os.path.join(configs['output_dir'], "vocab_config.yaml"))
 
-    # -------------- Small hack to change the vocab_config.yaml beat ------------- #
-    from ruamel.yaml import YAML
-
     # Create YAML object
-    yaml = YAML()
+    y = YAML()
     # Load existing config
     with open('Transformer/configs/vocab_config.yaml', 'r') as file:
-        vocab_configs = yaml.load(file)
+        vocab_configs = y.load(file)
 
     # Modify 'beat' key
     vocab_configs['event_types']['beat'] = [1, configs['max_beats'] * 12]
 
     # Save to new file in output directory
     with open(os.path.join(configs['output_dir'], 'vocab_config.yaml'), 'w') as file:
-        yaml.dump(vocab_configs, file)
+        y.dump(vocab_configs, file)
     # ------------------------------------- w ------------------------------------ #
     
     preprocessor = DataPreprocessor(configs)
