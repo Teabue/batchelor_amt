@@ -9,6 +9,12 @@ from typing import Optional, Union
 from utils.vocabularies import Vocabulary
 from torch.nn.utils.rnn import pad_sequence
 
+# Make mido ignore key signature
+import mido.midifiles.meta as meta
+# CAUTION: THIS WILL LITERALLY DELETE THINGS FROM THE MIDO LIBRARY - HAPPENED TO ME AT LEAST 
+# del meta._META_SPECS[0x59]
+# del meta._META_SPEC_BY_TYPE['key_signature']
+
 class Song:
     def __init__(self, song_path: str | os.PathLike, preprocess_config: dict):
         """
@@ -77,33 +83,59 @@ class Maestro(Song):
 
 
     def compute_onset_offset_times(self):
-        midi_path = os.path.join(os.path.dirname(self.song_path), self.song_name + '.midi')
+        if os.path.exists(os.path.join(os.path.dirname(self.song_path), self.song_name + '.midi')):
+            midi_path = os.path.join(os.path.dirname(self.song_path), self.song_name + '.midi')
+        elif os.path.exists(os.path.join(os.path.dirname(self.song_path), self.song_name + '.mid')):
+            midi_path = os.path.join(os.path.dirname(self.song_path), self.song_name + '.mid')
+        else:
+            raise FileNotFoundError(f"No .midi or .mid file found for {self.song_name}")
         
         # Load midi file to get tempo
-        midi = mido.MidiFile(midi_path)
-        tempo = midi.tracks[0][0].tempo
+        midi_data = mido.MidiFile(midi_path)
+        note_events = []  # To store note events with onset and offset times
+        ongoing_notes = {}  # To track ongoing notes
+        cur_tempo = None
+        ticks_per_beat = midi_data.ticks_per_beat 
+        midi_msgs = mido.merge_tracks(midi_data.tracks)
 
-        # Resample midifile to match a certain sample rate
-        ticks_per_beat = int(tempo / (self.config['sr'] * 1e-6))
-        midi = mido.MidiFile(midi_path, ticks_per_beat=ticks_per_beat)
-
-        df = pd.DataFrame(columns=['pitch', 'onset', 'offset']) # midi_pitch, onset time and offset time in seconds
-        cur_time = 0
-        for msg in midi.tracks[1]:
-            cur_time += mido.tick2second(msg.time, ticks_per_beat=midi.ticks_per_beat, tempo=tempo)
+        time_sec = 0.0  # Current time in secs
+        time_ticks = 0  # Current time in ticks
+        for msg in midi_msgs:
+            if msg.type == 'set_tempo':
+                cur_tempo = msg.tempo
+                continue
+                            
+            if (cur_tempo == None and msg.time != 0) or cur_tempo != None:
+                if (cur_tempo == None and msg.time != 0):
+                    with open('MIDI_WO_TEMPO', 'a') as f:
+                        f.write(self.song_name + '\n')
+                    cur_tempo = 500000 # Set tempo to 120 bpm
+                time_sec += mido.tick2second(msg.time, ticks_per_beat=ticks_per_beat, tempo=cur_tempo)  # Accumulate time
+                time_ticks += msg.time
+            
             if msg.type == 'note_on' and msg.velocity > 0:
-                df = pd.concat([df, pd.DataFrame([{'pitch': msg.note, 'onset': cur_time}])], ignore_index=True)
-
-            # For some god awful reason, the Maestro dataset don't use note_off events, but note_on events with velocity 0 >:((
-            elif msg.type == 'note_on' and msg.velocity == 0:
-                # fill out the note_off event
-                df.loc[(df['pitch'] == msg.note) & (df['offset'].isnull()), 'offset'] = cur_time
+                # Note onset
+                if msg.note not in ongoing_notes:  # Check if note is not already on
+                    ongoing_notes[msg.note] = time_sec, time_ticks
+            elif (msg.type == 'note_off') or (msg.type == 'note_on' and msg.velocity == 0):
+                # Note offset
+                if msg.note in ongoing_notes:
+                    onset_time_sec, onset_time_ticks = ongoing_notes.pop(msg.note)
+                    note_events.append({'pitch': msg.note, 
+                                        'onset': onset_time_sec, 
+                                        'offset': time_sec,
+                                        'onset_ticks': onset_time_ticks})
+                else:
+                    raise Warning(f"Note off event without a note on event at time {time_sec}")
+        # Create DataFrame
+        df = pd.DataFrame(note_events)
         
-        if self.sanity_check:
-            if df['offset'].isnull().any():
-                raise ValueError('Missing note_off event from Maestro preprocessing')
+        # Onset_ticks is only used to avoid rounding errors
+        df_sorted = df.sort_values(by=['onset_ticks', 'pitch'], ascending=[True, True])
         
-        return df
+        df_final = df_sorted[['pitch', 'onset', 'offset']]
+        
+        return df_final
                 
                 
     def compute_labels_and_segments(self, df, spectrogram, sequence_length: Optional[Union[str,int]] = 'random') -> pd.DataFrame:

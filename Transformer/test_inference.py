@@ -14,68 +14,81 @@ from utils.preprocess_song import Song
 from utils.model import Transformer
 
 
-def create_midi_from_model_events(events, bpm_tempo, output_dir='', onset_only=False):
+def create_midi_from_model_events(translated_sequences, bpm_tempo, output_dir='', onset_only=False, output_name='output'):
     """Don't use onset_only, it's truly shit
     """
     mid = MidiFile()
     track = MidiTrack()
     mid.tracks.append(track)
     tempo = bpm2tempo(bpm_tempo)
-    track.append(MetaMessage('key_signature', key='A'))
+    # track.append(MetaMessage('key_signature', key='A'))
     track.append(MetaMessage('set_tempo', tempo=tempo))
     track.append(MetaMessage('time_signature', numerator=4, denominator=4))
-
-    delta_time = 0
-    offset_onset = None
-    for event in events:
-        if event[0] == 'PAD' or event[0] == 'SOS' or event[0] == 'ET':
-            continue
-        elif event[0] == 'EOS':
-            offset_onset = None
-        elif event[0] == 'time_shift':
-            delta_time += second2tick(event[1]/100, mid.ticks_per_beat, tempo)
-        elif event[0] == 'offset_onset':
-            offset_onset = event[1]
-        elif event[0] == 'pitch':
-            if offset_onset is None:
-                # These pitches are from before the ET token
-                continue
-            if offset_onset == 0:
-                # Just a glorified note-off event. I'm doing this because maestro did it first >:(
-                if not onset_only:
-                    track.append(Message('note_off', channel=1, note=event[1], velocity=64, time=delta_time))
-            elif offset_onset == 1:
-                if onset_only:
-                    track.append(Message('note_on', channel=1, note=event[1], velocity=100, time=delta_time))
-                    track.append(Message('note_off', channel=1, note=event[1], velocity=100, time=delta_time+128))
-                else:
-                    track.append(Message('note_on', channel=1, note=event[1], velocity=100, time=delta_time))
-            else:
-                raise ValueError('offset_onset should be 0 or 1')
+    
+    for events in translated_sequences:
+        delta_time = 0
+        offset_onset = None
+        et_processed = True
+        # Check for ET first
+        for event in events:
+            if event[0] == 'ET':
+                et_processed = False
+                break 
             
-            delta_time = 0
+        for event in events:
+            if event[0] == 'PAD' or event[0] == 'SOS' or event[0] == 'ET':
+                if event[0] == 'ET':
+                    et_processed = True
+                continue
+            elif not et_processed:
+                continue
+            elif event[0] == 'EOS':
+                offset_onset = None
+            elif event[0] == 'time_shift':
+                delta_time += second2tick(event[1]/100, mid.ticks_per_beat, tempo)
+            elif event[0] == 'offset_onset':
+                offset_onset = event[1]
+            elif event[0] == 'pitch':
+                if offset_onset is None:
+                    # These pitches are from before the ET token
+                    continue
+                if offset_onset == 0:
+                    # Just a glorified note-off event. I'm doing this because maestro did it first >:(
+                    if not onset_only:
+                        track.append(Message('note_off', channel=1, note=event[1], velocity=64, time=delta_time))
+                elif offset_onset == 1:
+                    if onset_only:
+                        track.append(Message('note_on', channel=1, note=event[1], velocity=100, time=delta_time))
+                        track.append(Message('note_off', channel=1, note=event[1], velocity=100, time=delta_time+128))
+                    else:
+                        track.append(Message('note_on', channel=1, note=event[1], velocity=100, time=delta_time))
+                else:
+                    raise ValueError('offset_onset should be 0 or 1')
+                
+                delta_time = 0
 
     track.append(MetaMessage('end_of_track'))
 
-    mid.save(os.path.join(output_dir,'pirate2_512.midi'))
+    mid.save(os.path.join(output_dir, output_name + '.midi'))
 
 if __name__ == '__main__':
     """HAHAHAHAH imagine at lave argparsers hahaha pfffff LOL #DovenskabLængeLeeeeeve"""
     
     # -------------------------- Choose own custom song -------------------------- #
-    new_song_path = '/zhome/5d/a/168095/batchelor_amt/test_songs/Pirate_piano.mp3'
-    test_new_song = True
-    bpm_tempo = 133
+    new_song_path = '/zhome/5d/a/168095/batchelor_amt/test_songs/flower.mp3'
+    test_new_song = False
+    bpm_tempo = 100
     sequence_length = 128
     
     # ----------------------------- OR choose test song ----------------------------- #
-    song_name = 'MIDI-Unprocessed_24_R1_2006_01-05_ORIG_MID--AUDIO_24_R1_2006_01_Track01_wav'
-    data_dir = '/work3/s214629/preprocessed_data_best'
+    song_name = 'schuberttrioeb4d_PianoTrioD929'
+    data_dir = '/work3/s214629/preprocessed_data/13-06-2024_TS_ambr'
     test_preprocessing_works = False
+    test_split_location = 'test'
     
     
     # ------------------------------- Choose model ------------------------------- #
-    run_path = '/work3/s214629/run_a100_hope3_cont_smallest_lr'
+    run_path = '/work3/s214629/runs/13-06-24_TS_gen_ambr_real'
     model_name = 'model_best.pth'
     
     # --------------------------------- Run stuff -------------------------------- #
@@ -95,7 +108,7 @@ if __name__ == '__main__':
 
     if not test_new_song:
         spectrogram = np.load(os.path.join(data_dir, 'spectrograms', f'{song_name}.npy'))
-        df = pd.read_csv(os.path.join(data_dir, 'test', 'labels.csv'))
+        df = pd.read_csv(os.path.join(data_dir, test_split_location, 'labels.csv'))
         df = df[df['song_name'] == song_name] # get all segments of the song
 
         sequences = []
@@ -121,21 +134,21 @@ if __name__ == '__main__':
         model.eval()
 
         # Prepare the sequences
-        all_sequence_events = []
+        translated_sequences = []
         # This might be dumb, Idk yet 
         for sequence_spec in tqdm(spectrograms, total=len(spectrograms), desc='Generating predictions'):
             # torch.tensor([[1]]) because SOS token is 1 
             output = model.get_sequence_predictions(sequence_spec.unsqueeze(0), torch.tensor([[1]], device=device), config['max_seq_length'])
             output = output.squeeze()
             events = vocab.translate_sequence_token_to_events(output.tolist())
-            all_sequence_events.extend(events)
+            translated_sequences.append(events)
     elif not test_new_song:
         # Create a midi based off of the ground truths
-        all_sequence_events = []
+        translated_sequences = []
         for idx, row in df.iterrows():
             labels = json.loads(row['labels'])
             events = vocab.translate_sequence_token_to_events(labels)
-            all_sequence_events.extend(events)
+            translated_sequences.append(events)
     else:
         raise ValueError('test_new_song and test_preprocessing_works cannot both be True.')
         
@@ -146,7 +159,8 @@ if __name__ == '__main__':
                 bpm_tempo = MidiFile(os.path.join(root, song_name + '.midi')).tracks[0][0].tempo
                 break
 
-    create_midi_from_model_events(all_sequence_events, bpm_tempo, onset_only=False)
+    create_midi_from_model_events(translated_sequences, bpm_tempo, onset_only=False, output_name=song_name + '_pred')
+
 
 
 

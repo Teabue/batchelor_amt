@@ -163,14 +163,14 @@ if __name__ == '__main__':
     data_parallelism = False
     
     # SET THIS, I'M TOO LAZY TO ARGUMENT PARSE
-    pretrained_run_path = '/work3/s214629/run_a100_hope3_cont_smallest_lr' # Comment out to train a new model from scratch
+    # pretrained_run_path = '/work3/s214629/run_a100_hope3_cont_smallest_lr' # Comment out to train a new model from scratch
 
     if pretrained_run_path != None:
         with open(os.path.join(pretrained_run_path,'train_config.yaml'), 'r') as f:
             config = yaml.safe_load(f)
 
         # CHANGE NEEDED SETTINGS HERE
-        config['run_save_path'] = '/work3/s214629/run_a100_hope3_cont_cont_00001'
+        config['run_save_path'] = '/work3/s214629/runs/05-06-24_time_shift_gen-audio_aug_cont_00001'
         config['num_epochs'] = 69
         config['seed'] = config['seed'] + 33 # We need to set to something else so the batches won't be identical
         config['lr'] = 0.00001
