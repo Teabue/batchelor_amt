@@ -75,7 +75,7 @@ for run_folder in run_folders:
         
         
         # Get the ground truth score
-        gt = inference.preprocess_ground_truth(song)
+        gt = inference.preprocess_ground_truth()
         
         # Retrieve initial bpm
         init_bpm = gt.metronomeMarkBoundaries()[0][-1].getQuarterBPM()

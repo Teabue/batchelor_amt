@@ -3,6 +3,13 @@ import shutil
 from music21 import converter, expressions, note
 import numpy as np
 
+def measure_check(score):
+    """Function to check that no measures are too long"""
+    for part in score.parts:
+        for measure in part.getElementsByClass('Measure'):
+            if measure.duration.quarterLength > measure.getContextByClass('TimeSignature').barDuration.quarterLength:
+                return True, measure.getOffsetBySite(part)
+
 def fermata_check(score):
     """Function to check for fermatas not in the last measure"""
     

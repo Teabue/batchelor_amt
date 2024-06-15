@@ -92,34 +92,58 @@ class Maestro(Song):
         super().__init__(song_filename, preprocess_config)
 
 
-    def compute_onset_offset_times(self):
+    def compute_onset_offset_times(self, time_to_beat: bool = False):
         midi_path = os.path.join(os.path.dirname(self.song_path), self.song_name + '.midi')
         
-        # Load midi file to get tempo
-        midi = mido.MidiFile(midi_path)
-        tempo = midi.tracks[0][0].tempo
-
-        # Resample midifile to match a certain sample rate
-        ticks_per_beat = int(tempo / (self.config['sr'] * 1e-6))
-        midi = mido.MidiFile(midi_path, ticks_per_beat=ticks_per_beat)
-
-        df = pd.DataFrame(columns=['pitch', 'onset', 'offset']) # midi_pitch, onset time and offset time in seconds
-        cur_time = 0
-        for msg in midi.tracks[1]:
-            cur_time += mido.tick2second(msg.time, ticks_per_beat=midi.ticks_per_beat, tempo=tempo)
+        midi_data = mido.MidiFile(midi_path)
+        note_events = []  # To store note events with onset and offset times
+        ongoing_notes = {}  # To track ongoing notes
+        cur_tempo = None
+        cur_bpm = None
+        ticks_per_beat = midi_data.ticks_per_beat 
+        midi_msgs = mido.merge_tracks(midi_data.tracks)
+        
+        time_sec = 0.0  # Current time in secs
+        time_beat = Fraction(0)
+        time_ticks = 0  # Current time in ticks
+        for msg in midi_msgs:
+            if msg.type == 'set_tempo':
+                cur_tempo = msg.tempo
+                cur_bpm = mido.tempo2bpm(cur_tempo)
+                continue
+            
+            prev_time = time_sec
+            time_sec += mido.tick2second(msg.time, ticks_per_beat=ticks_per_beat, tempo=cur_tempo)  # Accumulate time
+            time_beat += Fraction((time_sec - prev_time) * cur_bpm / 60)
+            time_ticks += msg.time
+            
             if msg.type == 'note_on' and msg.velocity > 0:
-                df = pd.concat([df, pd.DataFrame([{'pitch': msg.note, 'onset': cur_time}])], ignore_index=True)
-
-            # For some god awful reason, the Maestro dataset don't use note_off events, but note_on events with velocity 0 >:((
-            elif msg.type == 'note_on' and msg.velocity == 0:
-                # fill out the note_off event
-                df.loc[(df['pitch'] == msg.note) & (df['offset'].isnull()), 'offset'] = cur_time
+                # Note onset
+                if msg.note not in ongoing_notes:  # Check if note is not already on
+                    
+                    # Store onset either in beat or seconds
+                    onset = time_beat if time_to_beat else time_sec 
+                    ongoing_notes[msg.note] = onset, time_ticks
+                    
+            elif (msg.type == 'note_off') or (msg.type == 'note_on' and msg.velocity == 0):
+                # Note offset
+                if msg.note in ongoing_notes:
+                    onset_time, onset_time_ticks = ongoing_notes.pop(msg.note)
+                    offset = time_beat if time_to_beat else time_sec
+                    
+                    note_events.append({'pitch': msg.note, 
+                                        'onset': onset_time, 
+                                        'offset': offset,
+                                        'onset_ticks': onset_time_ticks})
+        # Create DataFrame
+        df = pd.DataFrame(note_events)
         
-        if self.sanity_check:
-            if df['offset'].isnull().any():
-                raise ValueError('Missing note_off event from Maestro preprocessing')
+        # Onset_ticks is only used to avoid rounding errors
+        df_sorted = df.sort_values(by=['onset_ticks', 'pitch'], ascending=[True, True])
         
-        return df
+        df_final = df_sorted[['pitch', 'onset', 'offset']]
+        
+        return df_final
       
             
     def compute_labels_and_segments(self, df, spectrogram):
@@ -200,9 +224,9 @@ class Maestro(Song):
         return df
             
         
-    def preprocess(self) -> None:
+    def preprocess(self, **kwargs) -> None:
         spectrogram = self.compute_spectrogram(save_path = os.path.join(self.config['output_dir'], 'spectrograms', f'{self.song_name}.npy'))
-        df_onset_offset = self.compute_onset_offset_times()
+        df_onset_offset = self.compute_onset_offset_times(**kwargs)
         df_labels = self.compute_labels_and_segments(df_onset_offset, spectrogram)
         return df_labels
 

@@ -15,7 +15,7 @@ from mido import Message, MetaMessage, MidiFile, MidiTrack, bpm2tempo, second2ti
 from music21 import converter, stream, note, chord, duration, meter, tempo, spanner, clef, layout, key, bar, metadata
 
 from utils.vocabularies import Vocabulary
-from utils.preprocess_song import Song, MuseScore
+from utils.preprocess_song import Song, MuseScore, Maestro
 from utils.model import Transformer
 
 class Inference:
@@ -209,7 +209,7 @@ class Inference:
                     np.save(os.path.join(save_dir, song_name), sequence_events)
                     
                     # Load the ground truth xml
-                    gt = self.preprocess_ground_truth(song_name)
+                    gt = self.preprocess_ground_truth()
                     
                     # Update the song name
                     self.song_name = song_name
@@ -701,19 +701,28 @@ class Inference:
         
         return score
 
-    def preprocess_ground_truth(self, song_name):
+    def preprocess_ground_truth(self, dataset: str = 'musescore', new_song: bool = False):
         
-        # Find the path to the gt file
-        song_wo_ext = os.path.join(os.path.dirname(self.audio_dir), song_name)
-        avail_paths = np.array([os.path.exists(f"{song_wo_ext}.{ext}") for ext in self.pre_config['audio_file_extension']])
-        if not np.any(avail_paths):
-            raise FileNotFoundError(f"{song_name} could not be found")
-        avail_ext = np.asarray(self.pre_config['audio_file_extension'])[avail_paths][0]
-        song_path = f"{song_wo_ext}.{avail_ext}"
-        
-        # Load the ground truth xml
-        gt_song = MuseScore(song_path, self.pre_config)
-        df_gt = gt_song.preprocess()
+        if new_song:
+            # Find the path to the gt file
+            song_wo_ext = os.path.join(os.path.dirname(self.audio_dir), self.song_name)
+            avail_paths = np.array([os.path.exists(f"{song_wo_ext}.{ext}") for ext in self.pre_config['audio_file_extension']])
+            if not np.any(avail_paths):
+                raise FileNotFoundError(f"{self.song_name} could not be found")
+            avail_ext = np.asarray(self.pre_config['audio_file_extension'])[avail_paths][0]
+            song_path = f"{song_wo_ext}.{avail_ext}"
+            
+            # Load the ground truth xml
+            if dataset == 'musescore':
+                gt_song = MuseScore(song_path, self.pre_config)
+                df_gt = gt_song.preprocess()
+            else:
+                gt_song = Maestro(song_path, self.pre_config)
+                df_gt = gt_song.preprocess(time_to_beat = True)
+        else:
+            # Retrieve all gt song names
+            df = pd.read_csv(os.path.join(self.data_dir, 'test', 'labels.csv'))
+            df_gt = df[df['song_name'] == self.song_name]
         
         # Create a sheet based off of the ground truths
         sequence_events = []
@@ -1225,6 +1234,7 @@ if __name__ == '__main__':
     preprocess = False
     overlap = True
     preproc_to_overlap = False
+    midi = True
     
     # --------------------------------- Collect directories -------------------------------- #
     output_dir = "inference_songs"
@@ -1258,7 +1268,7 @@ if __name__ == '__main__':
      
     if overlap:
 
-        gt = inference.preprocess_ground_truth(new_song_name)
+        gt = inference.preprocess_ground_truth(new_song = new_song)
         
         # Get predicted score
         init_bpm = gt.metronomeMarkBoundaries()[0][-1].getQuarterBPM()
