@@ -8,6 +8,7 @@ special_tokens:
 event_types: 
   pitch: [0, 127] # Note that the -2 and -1 tokens are helper tokens to mark tempo and downbeats. They do not represent a pitch in of themselves
   offset_onset: [0, 1]  # 1 is onset, 0 is offset
+  time_shift: [1, 1600]
   beat: None #  Dynamically set inside vocabularies.py with the assumption of 32 notes and 16 tuplets (48 total)
   tempo: [10, 300] # BPM
 

@@ -187,7 +187,7 @@ class PositionalEncoding(nn.Module):
 if __name__ == "__main__":
     import yaml
     import tqdm
-    from utils.vocabularies import Vocabulary
+    from utils.vocabularies import VocabBeat, VocabTime
     from utils.data_loader import TransformerDataset
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -205,9 +205,15 @@ if __name__ == "__main__":
 
     with open('Transformer/configs/vocab_config.yaml', 'r') as file:
         config = yaml.safe_load(file)
-        
-    vocab = Vocabulary(config)
-    vocab.define_vocabulary(p_config['max_beats'])
+    
+    if p_config['model'] == "TimeShift":
+        vocab = VocabTime(config)
+        vocab.define_vocabulary()
+    elif p_config['model'] == "BeatTrack":
+        vocab = VocabBeat(config)
+        vocab.define_vocabulary(p_config['max_beats'])
+    else:
+        raise ValueError('Model type not recognized')
     
     tgt_vocab_size = vocab.vocab_size
     

@@ -8,9 +8,16 @@ import torch
 
 from fractions import Fraction
 from music21 import *
-from utils.vocabularies import Vocabulary
+from typing import Optional, Union
+from utils.vocabularies import VocabTime, VocabBeat
 from .song_check import fermata_check
 from torch.nn.utils.rnn import pad_sequence
+
+# Make mido ignore key signature
+import mido.midifiles.meta as meta
+# CAUTION: THIS WILL LITERALLY DELETE THINGS FROM THE MIDO LIBRARY - HAPPENED TO ME AT LEAST 
+# del meta._META_SPECS[0x59]
+# del meta._META_SPEC_BY_TYPE['key_signature']
 
 class Song:
     def __init__(self, song_path: str | os.PathLike, preprocess_config: dict):
@@ -26,8 +33,8 @@ class Song:
         os.makedirs(os.path.join(self.config['output_dir'], 'spectrograms'), exist_ok=True)
     
     
-    def compute_spectrogram(self, save_path = None) -> np.ndarray:
-        """Computes a ndarray representation of the spectrogram of the song and saves it as npy file.
+    def compute_spectrogram(self, save_path: str = None) -> np.ndarray:
+        """Computes a ndarray representation of the spectrogram of the song and saves it as npy file if desired.
 
         Raises:
             ValueError: When the preprocessing methods aren't one of the available methods
@@ -57,27 +64,41 @@ class Song:
             
         return spectrogram
         
-    def preprocess_inference_new_song(self, spectrogram, cur_frame: int, bpm: int = 120) -> torch.Tensor:
-        frame_times = librosa.frames_to_time(range(spectrogram.shape[1]), sr=self.config['sr'], hop_length=self.config['hop_length'], n_fft=self.config['n_fft'])
-        total_duration = frame_times[-1] - frame_times[cur_frame]
-        beats_left = total_duration * bpm / 60 # Assumes that the BPM is constant from here on out
+    def preprocess_inference_new_song(self, random_slice: bool, spectrogram: np.ndarray | None = None , cur_frame: int = 0, bpm: int = 120, sequence_size: int = 128) -> torch.Tensor:
         
-        min_size = self.config['min_beats']
-        max_size = self.config['max_beats'] if beats_left > self.config['max_beats'] else beats_left
+        if random_slice:
+            spectrogram = self.compute_spectrogram()
+            spectrogram = spectrogram.T
+            spectrogram_slices = torch.from_numpy(spectrogram).split(sequence_size, 0)
+
+            spectrogram_slices = pad_sequence(list(spectrogram_slices), batch_first=True, padding_value=-1)
+
+            return spectrogram_slices
         
-        if 0 < np.round(beats_left - min_size) < max_size:
-            beats_in_seq = np.round(beats_left - min_size)
-        elif max_size >= min_size:
-            beats_in_seq = np.random.randint(min_size, max_size + 1)
         else:
-            new_frame = spectrogram.shape[1]
-            return torch.from_numpy(spectrogram)[:, cur_frame:], new_frame
-        
-        time_to_add = beats_in_seq * 60 / bpm
-        new_frame = cur_frame + np.argmin(np.abs(frame_times - time_to_add))
-        
-        spectrogram_slice = torch.from_numpy(spectrogram)[:, cur_frame:new_frame]
-        return spectrogram_slice, new_frame
+            if spectrogram is None:
+                raise ValueError("Spectrogram has to be provided when random_slice is False")
+            
+            frame_times = librosa.frames_to_time(range(spectrogram.shape[1]), sr=self.config['sr'], hop_length=self.config['hop_length'], n_fft=self.config['n_fft'])
+            total_duration = frame_times[-1] - frame_times[cur_frame]
+            beats_left = total_duration * bpm / 60 # Assumes that the BPM is constant from here on out
+            
+            min_size = self.config['min_beats']
+            max_size = self.config['max_beats'] if beats_left > self.config['max_beats'] else beats_left
+            
+            if 0 < np.round(beats_left - min_size) < max_size:
+                beats_in_seq = np.round(beats_left - min_size)
+            elif max_size >= min_size:
+                beats_in_seq = np.random.randint(min_size, max_size + 1)
+            else:
+                new_frame = spectrogram.shape[1]
+                return torch.from_numpy(spectrogram)[:, cur_frame:], new_frame
+            
+            time_to_add = beats_in_seq * 60 / bpm
+            new_frame = cur_frame + np.argmin(np.abs(frame_times - time_to_add))
+            
+            spectrogram_slice = torch.from_numpy(spectrogram)[:, cur_frame:new_frame]
+            return spectrogram_slice, new_frame
         
     def compute_labels_and_segments(self) -> None:
         NotImplementedError("This method should be implemented in the subclass")
@@ -92,49 +113,51 @@ class Maestro(Song):
         super().__init__(song_filename, preprocess_config)
 
 
-    def compute_onset_offset_times(self, time_to_beat: bool = False):
-        midi_path = os.path.join(os.path.dirname(self.song_path), self.song_name + '.midi')
+    def compute_onset_offset_times(self):
+        if os.path.exists(os.path.join(os.path.dirname(self.song_path), self.song_name + '.midi')):
+            midi_path = os.path.join(os.path.dirname(self.song_path), self.song_name + '.midi')
+        elif os.path.exists(os.path.join(os.path.dirname(self.song_path), self.song_name + '.mid')):
+            midi_path = os.path.join(os.path.dirname(self.song_path), self.song_name + '.mid')
+        else:
+            raise FileNotFoundError(f"No .midi or .mid file found for {self.song_name}")
         
+         # Load midi file to get tempo
         midi_data = mido.MidiFile(midi_path)
         note_events = []  # To store note events with onset and offset times
         ongoing_notes = {}  # To track ongoing notes
         cur_tempo = None
-        cur_bpm = None
         ticks_per_beat = midi_data.ticks_per_beat 
         midi_msgs = mido.merge_tracks(midi_data.tracks)
-        
+
         time_sec = 0.0  # Current time in secs
-        time_beat = Fraction(0)
         time_ticks = 0  # Current time in ticks
         for msg in midi_msgs:
             if msg.type == 'set_tempo':
                 cur_tempo = msg.tempo
-                cur_bpm = mido.tempo2bpm(cur_tempo)
                 continue
-            
-            prev_time = time_sec
-            time_sec += mido.tick2second(msg.time, ticks_per_beat=ticks_per_beat, tempo=cur_tempo)  # Accumulate time
-            time_beat += Fraction((time_sec - prev_time) * cur_bpm / 60)
-            time_ticks += msg.time
+                            
+            if (cur_tempo == None and msg.time != 0) or cur_tempo != None:
+                if (cur_tempo == None and msg.time != 0):
+                    with open('MIDI_WO_TEMPO', 'a') as f:
+                        f.write(self.song_name + '\n')
+                    cur_tempo = 500000 # Set tempo to 120 bpm
+                time_sec += mido.tick2second(msg.time, ticks_per_beat=ticks_per_beat, tempo=cur_tempo)  # Accumulate time
+                time_ticks += msg.time
             
             if msg.type == 'note_on' and msg.velocity > 0:
                 # Note onset
                 if msg.note not in ongoing_notes:  # Check if note is not already on
-                    
-                    # Store onset either in beat or seconds
-                    onset = time_beat if time_to_beat else time_sec 
-                    ongoing_notes[msg.note] = onset, time_ticks
-                    
+                    ongoing_notes[msg.note] = time_sec, time_ticks
             elif (msg.type == 'note_off') or (msg.type == 'note_on' and msg.velocity == 0):
                 # Note offset
                 if msg.note in ongoing_notes:
-                    onset_time, onset_time_ticks = ongoing_notes.pop(msg.note)
-                    offset = time_beat if time_to_beat else time_sec
-                    
+                    onset_time_sec, onset_time_ticks = ongoing_notes.pop(msg.note)
                     note_events.append({'pitch': msg.note, 
-                                        'onset': onset_time, 
-                                        'offset': offset,
+                                        'onset': onset_time_sec, 
+                                        'offset': time_sec,
                                         'onset_ticks': onset_time_ticks})
+                else:
+                    raise Warning(f"Note off event without a note on event at time {time_sec}")
         # Create DataFrame
         df = pd.DataFrame(note_events)
         
@@ -144,9 +167,9 @@ class Maestro(Song):
         df_final = df_sorted[['pitch', 'onset', 'offset']]
         
         return df_final
-      
-            
-    def compute_labels_and_segments(self, df, spectrogram):
+                
+                
+    def compute_labels_and_segments(self, df, spectrogram, sequence_length: Optional[Union[str,int]] = 'random'):
                 
         frame_times = librosa.frames_to_time(range(spectrogram.shape[1]), sr=self.config['sr'], hop_length=self.config['hop_length'])
 
@@ -163,8 +186,11 @@ class Maestro(Song):
         # While the total size is greater than the maximum size...
         while total_size > max_size:
             # Generate a random size between min_size and max_size
-            size = np.random.randint(min_size, max_size)
-
+            if sequence_length == 'random':
+                size = np.random.randint(min_size, max_size)
+            else: 
+                size = sequence_length
+                
             # Add the size to the list of sizes
             sizes.append(size)
 
@@ -207,7 +233,7 @@ class Maestro(Song):
         # ---------------------------- Translate to tokens --------------------------- #
         with open("Transformer/configs/vocab_config.yaml", 'r') as f:
             vocab_configs = yaml.safe_load(f)
-        vocab = Vocabulary(vocab_configs)
+        vocab = VocabTime(vocab_configs)
         
         vocab.define_vocabulary()
         
@@ -224,10 +250,10 @@ class Maestro(Song):
         return df
             
         
-    def preprocess(self, **kwargs) -> None:
+    def preprocess(self) -> None:
         spectrogram = self.compute_spectrogram(save_path = os.path.join(self.config['output_dir'], 'spectrograms', f'{self.song_name}.npy'))
-        df_onset_offset = self.compute_onset_offset_times(**kwargs)
-        df_labels = self.compute_labels_and_segments(df_onset_offset, spectrogram)
+        df_onset_offset = self.compute_onset_offset_times()
+        df_labels = self.compute_labels_and_segments(df_onset_offset, spectrogram, sequence_length=self.config['sequence_length'])
         return df_labels
 
 class MuseScore(Song):
@@ -446,7 +472,7 @@ class MuseScore(Song):
         # ---------------------------- Translate to tokens --------------------------- #
         with open("Transformer/configs/vocab_config.yaml", 'r') as f:
             vocab_configs = yaml.safe_load(f)
-        vocab = Vocabulary(vocab_configs)
+        vocab = VocabBeat(vocab_configs)
 
         vocab.define_vocabulary(self.config['max_beats'])
         sequence_tokens = []

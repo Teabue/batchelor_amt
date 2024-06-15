@@ -6,7 +6,7 @@ import numpy as np
 import torch.nn as nn
 from utils.model import Transformer
 from utils.data_loader_2 import TransformerDataset  
-from utils.vocabularies import Vocabulary
+from utils.vocabularies import VocabBeat, VocabTime
 
 
 
@@ -138,9 +138,15 @@ def simple_setup(device = 'cuda',
     
     with open(os.path.join(data_dir,'vocab_config.yaml'), 'r') as file:
         config = yaml.safe_load(file)
-        
-    vocab = Vocabulary(config)
-    vocab.define_vocabulary(p_config['max_beats'])
+    
+    if p_config['model'] == "TimeShift":
+        vocab = VocabTime(config)
+        vocab.define_vocabulary()
+    elif p_config['model'] == "BeatTrack":
+        vocab = VocabBeat(config)
+        vocab.define_vocabulary(p_config['max_beats'])
+    else:
+        raise ValueError('Model type not recognized')
     
     tgt_vocab_size = vocab.vocab_size
     
@@ -175,7 +181,7 @@ if __name__ == '__main__':
             config = yaml.safe_load(f)
 
         # CHANGE NEEDED SETTINGS HERE
-        config['run_save_path'] = '/work3/s214629/run_a100_hope3_cont_cont_00001'
+        config['run_save_path'] = '/work3/s214629/runs/05-06-24_time_shift_gen-audio_aug_cont_00001'
         config['num_epochs'] = 69
         config['seed'] = config['seed'] + 33 # We need to set to something else so the batches won't be identical
         config['lr'] = 0.00001

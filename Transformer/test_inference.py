@@ -1,7 +1,6 @@
 import copy
 import json
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
 import numpy as np
 import os
 import pandas as pd
@@ -12,14 +11,14 @@ import xml.etree.ElementTree as ET
 
 from fractions import Fraction
 from mido import Message, MetaMessage, MidiFile, MidiTrack, bpm2tempo, second2tick
-from music21 import converter, stream, note, chord, duration, meter, tempo, spanner, clef, layout, key, bar, metadata
+from music21 import stream, note, chord, duration, meter, tempo, spanner, clef, layout, key, bar, metadata
 
-from utils.vocabularies import Vocabulary
+from utils.vocabularies import VocabBeat
 from utils.preprocess_song import Song, MuseScore, Maestro
 from utils.model import Transformer
 
 class Inference:
-    def __init__(self, vocab: Vocabulary, configs: dict[str, str | None], 
+    def __init__(self, vocab: VocabBeat, configs: dict[str, str | None], 
                  dirs: dict[str, str | None], song_name: str, model_path: str = None):
         
         self.vocab = vocab
@@ -1220,7 +1219,7 @@ if __name__ == '__main__':
                "train": config}
     
     # --------------------------------- Define vocabulary -------------------------------- #
-    vocab = Vocabulary(vocab_configs)
+    vocab = VocabBeat(vocab_configs)
     vocab.define_vocabulary(pre_configs['max_beats'])
     
     # ------------------------------- Choose model ------------------------------- #
