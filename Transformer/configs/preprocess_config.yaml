@@ -25,16 +25,7 @@ model: 'TimeShift' #TimeShift or BeatTrack
 # -------------------------------- Directories ------------------------------- #
 # List of dataset directories
 data_dirs:
-  - /work3/s214645/maestro-v3.0.0/maestro-v3.0.0/2004
-  - /work3/s214645/maestro-v3.0.0/maestro-v3.0.0/2006
-  - /work3/s214645/maestro-v3.0.0/maestro-v3.0.0/2008
-  - /work3/s214645/maestro-v3.0.0/maestro-v3.0.0/2009
-  - /work3/s214645/maestro-v3.0.0/maestro-v3.0.0/2011
-  - /work3/s214645/maestro-v3.0.0/maestro-v3.0.0/2013
-  - /work3/s214645/maestro-v3.0.0/maestro-v3.0.0/2014
-  - /work3/s214645/maestro-v3.0.0/maestro-v3.0.0/2015
-  - /work3/s214645/maestro-v3.0.0/maestro-v3.0.0/2017
-  - /work3/s214645/maestro-v3.0.0/maestro-v3.0.0/2018
+  - /work3/s214645/dataset/asap
 augmented_dataset:      #/work3/s214629/data/augmented_data_generated
 
 audio_file_extensions:

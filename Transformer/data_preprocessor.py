@@ -130,12 +130,12 @@ if __name__ == '__main__':
     """ Run the file from the repo root folder"""
     
     parser = argparse.ArgumentParser(description="Update preprocess method in config.")
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--stft', action='store_true', help="Use the Short Time Fourier Transform preprocessing method.")
-    group.add_argument('--cqt', action='store_true', help="Use the Constant-Q Transform preprocessing method.")
-    group.add_argument('--logmel', action='store_true', help="Use the log Mel spectrogram preprocessing method.")
+    parser.add_argument('--fourier', type=str, choices=['stft', 'cqt', 'logmel'], help="Specify the fourier preprocessing method") 
+    parser.add_argument('--model', type=str, choices=['BeatTrack', 'TimeShift'], help="Specify the model to use: 'beat' or 'time'")
+    
+    
     args = parser.parse_args()
-        
+       
     # Write the updated configs back to the YAML file
     y = YAML()
     y.preserve_quotes = True
@@ -146,15 +146,16 @@ if __name__ == '__main__':
         configs = y.load(f)
     
     # Update preprocess_method based on the argument provided
-    if args.stft:
-        configs['preprocess_method'] = 'stft'
-    elif args.cqt:
-        configs['preprocess_method'] = 'cqt'
-    elif args.logmel:
-        configs['preprocess_method'] = 'logmel'
+    configs['preprocess_method'] = args.fourier
+    configs['model'] = args.model
+    
+    if args.model == 'BeatTrack':
+        configs['dataset'] = 'MuseScore'
+    elif args.model == 'TimeShift':
+        configs['dataset'] = 'Maestro'
     else:
-        raise ValueError("Invalid fourier argument")
-
+        raise ValueError("Invalid model")
+    
     with open('Transformer/configs/preprocess_config.yaml', 'w') as f:
         y.dump(configs, f)
     
