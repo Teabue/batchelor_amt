@@ -86,7 +86,7 @@ for run_folder in run_folders:
     for song in songs:
         
         # Find the path to the audio of the song
-        all_paths = [[os.path.exists(os.path.join(aud_path, f"{song}.{ext}")) for ext in configs['preprocess']['midi_file_extension']] for aud_path in audio_dirs]
+        all_paths = [[os.path.exists(os.path.join(aud_path, f"{song}.{ext}")) for ext in configs['preprocess']['midi_file_extensions']] for aud_path in audio_dirs]
         avail_paths = np.any(all_paths, axis = 1)
         if not np.any(avail_paths):
             raise FileNotFoundError(f"{song} could not be found")

@@ -20,7 +20,7 @@ hop_length: 512 # hop_length. The number of samples between successive frames is
 n_mels: 128 # number of mel bands to generate
 
 # -------------------------------- Model ------------------------------- #
-model: 'TimeShift' #TimeShift or BeatTrack
+model: 'BeatTrack' #TimeShift or BeatTrack
 
 # -------------------------------- Directories ------------------------------- #
 # List of dataset directories
@@ -32,11 +32,11 @@ audio_file_extensions:
   - '.wav'
   - '.mp3'
 
-score_file_extension:
+score_file_extensions:
   - '.xml'
   - '.mxl'
 
-midi_file_extension:
+midi_file_extensions:
   - '.mid'
   - '.midi'
 

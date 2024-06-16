@@ -317,7 +317,7 @@ if __name__ == '__main__':
     output_dir = "inference_songs"
     audio_dirs = np.asarray(configs['preprocess']['data_dirs'])
     
-    all_paths = [[os.path.exists(os.path.join(aud_path, f"{new_song_name}.{ext}")) for ext in pre_configs['midi_file_extension']] for aud_path in audio_dirs]
+    all_paths = [[os.path.exists(os.path.join(aud_path, f"{new_song_name}.{ext}")) for ext in pre_configs['midi_file_extensions']] for aud_path in audio_dirs]
     avail_paths = np.any(all_paths, axis = 1)
     if not np.any(avail_paths):
         raise FileNotFoundError(f"{new_song_name} could not be found")
