@@ -7,6 +7,7 @@ from itertools import cycle
 from utils.preprocess_song import Maestro
 import random
 
+random.seed(42)
 
 import logging
 """

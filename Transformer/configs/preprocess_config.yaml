@@ -13,7 +13,7 @@ preprocess_method: 'logmel' # 'logmel' or 'cqt'
 sr: 22050 # sample rate
 n_fft: 2048 # number of samples used for each fourier transform
 hop_length: 512 # hop_length. The number of samples between successive frames is n_fft - hope_length
-n_mels: 128 # number of mel bands to generate
+n_mels: 100 # number of mel bands to generate
 
 
 # List of dataset directories

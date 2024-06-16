@@ -45,17 +45,25 @@ class Song:
         save_path = os.path.join(self.config['output_dir'], 'spectrograms', f'{self.song_name}.npy')
         
         if self.config['preprocess_method'] == 'cqt':
-            cqt = librosa.cqt(y=x, sr=sr, hop_length=self.config['hop_length'], n_bins=11)
+            # Calculate the number of bins for CQT
+            cqt = librosa.cqt(y=x, sr=sr, hop_length=self.config['hop_length'], n_bins=self.config['n_mels'])
             cqt = librosa.amplitude_to_db(np.abs(cqt))
-
             spectrogram = cqt
 
-        
         elif self.config['preprocess_method'] == 'logmel':
+            # Compute the mel spectrogram
             mel_spectrogram = librosa.feature.melspectrogram(y=x, sr=sr, n_fft=self.config['n_fft'], hop_length=self.config['hop_length'], n_mels=self.config['n_mels'])
+            # Convert to decibel scale to get log-mel spectrogram
             log_mel_spectrogram = librosa.power_to_db(mel_spectrogram)
-            
             spectrogram = log_mel_spectrogram
+
+        elif self.config['preprocess_method'] == 'stft':
+            # Compute the STFT
+            stft = librosa.stft(x, n_fft=self.config['n_fft'], hop_length=self.config['hop_length'])
+            # Convert to decibel scale
+            stft_spectrogram = librosa.amplitude_to_db(np.abs(stft))
+            spectrogram = stft_spectrogram
+
         else:
             raise ValueError("Invalid choice of preprocess method.")
         
