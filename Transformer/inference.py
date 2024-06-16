@@ -14,24 +14,11 @@ import os
 # Create the parser
 parser = argparse.ArgumentParser(description='Process Fourier and loss arguments.')
 
-# Add mutually exclusive groups
-fourier_group = parser.add_mutually_exclusive_group(required=True)
-loss_group = parser.add_mutually_exclusive_group(required=True)
-
 # Add arguments to the Fourier group
-fourier_group.add_argument('--stft', action='store_true', help='Use Short-Time Fourier Transform')
-fourier_group.add_argument('--cqt', action='store_true', help='Use Constant-Q Transform')
-fourier_group.add_argument('--logmel', action='store_true', help='Use Log-Mel Spectrogram')
-
-# Add arguments to the loss group
-loss_group.add_argument('--cl', action='store_true', help='Use Custom Loss')
-loss_group.add_argument('--ce', action='store_true', help='Use Cross-Entropy Loss')
+parser.add_argument('--fourier', type=str, choices=['stft', 'cqt', 'logmel'], help="Specify the fourier preprocessing method") 
 
 # Parse the arguments
 args = parser.parse_args()
-
-# Determine Fourier argument
-fourier_arg = 'stft' if args.stft else 'cqt' if args.cqt else 'logmel'
 
 # Determine loss argument
 loss_arg = 'cl' if args.cl else 'ce'
@@ -55,6 +42,9 @@ for run_folder in run_folders:
         
     with open(os.path.join(config['data_dir'], "vocab_config.yaml"), 'r') as f:
         vocab_configs = yaml.safe_load(f)
+
+    # Determine Fourier argument 
+    configs['preprocess_method'] = args.fourier
 
     configs = {"preprocess": pre_configs,
                 "vocab": vocab_configs,

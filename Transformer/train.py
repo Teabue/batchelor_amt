@@ -219,9 +219,9 @@ if __name__ == '__main__':
                                                                         pretrained_run_path=pretrained_run_path,
                                                                         data_parallelism=data_parallelism)
     
-    if args.loss == 'crossentropy':
+    if args.loss == 'ce':
         criterion = nn.CrossEntropyLoss(ignore_index=0)
-    elif args.loss == 'customloss':
+    elif args.loss == 'cl':
         criterion = CustomLoss(vocab).compute_loss
     else:
         raise ValueError('Loss function not recognized')
