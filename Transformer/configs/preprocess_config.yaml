@@ -4,9 +4,9 @@ max_sequence_length: 512
 sequence_length: 128
 
 # ---------------------------------- Splits ---------------------------------- #
-train: 0.85 # 0.8
-test: 0.05 # 0.1
-val: 0.1 # 0.1
+train: 0.8
+test: 0.1
+val: 0.1
 seed: 42
 dataset: MuseScore
 
@@ -17,7 +17,7 @@ max_beats: 28 # hyperparameter: maximum number of beats to slice the audio into
 sr: 22050 # sample rate
 n_fft: 2048 # number of samples used for each fourier transform
 hop_length: 512 # hop_length. The number of samples between successive frames is n_fft - hope_length
-n_mels: 1025 # number of mel bands to generate
+n_mels: 100 # number of mel bands to generate
 
 # -------------------------------- Model ------------------------------- #
 model: 'BeatTrack' #TimeShift or BeatTrack
@@ -25,8 +25,9 @@ model: 'BeatTrack' #TimeShift or BeatTrack
 # -------------------------------- Directories ------------------------------- #
 # List of dataset directories
 data_dirs:
-  - /work3/s214655/datasets/asap
-augmented_dataset:      #/work3/s214629/data/augmented_data_generated
+  - 'C:/University/batchelor_amt/datasets/asap_generated'
+augmented_dataset: 'C:/University/batchelor_amt/datasets/asap_augmented_data_generated'
+augmented_dataset_percentage_to_use: 0.25
 
 audio_file_extensions:
   - '.wav'
@@ -41,6 +42,6 @@ midi_file_extensions:
   - '.mid'
   - '.midi'
 
-output_dir: /work3/s214655/preprocessed_data/logmel # Preprocessed data will be saved to output_dir/spectrograms/ and output_dir/labels/
-output_base_dir: '/work3/s214655/preprocessed_data/'
-output_specific_dir: logmel
+output_dir: 'C:/University/batchelor_amt/datasets/preprocessed_data/logmel' # Preprocessed data will be saved to output_dir/spectrograms/ and output_dir/labels/
+output_base_dir: 'C:/University/batchelor_amt/datasets/preprocessed_data/'
+output_specific_dir: 'logmel'

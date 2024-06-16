@@ -9,9 +9,11 @@ import torch
 from fractions import Fraction
 from music21 import *
 from typing import Optional, Union
-from utils.vocabularies import VocabTime, VocabBeat
-from .song_check import fermata_check
+from vocabularies import VocabTime, VocabBeat
+from song_check import fermata_check
 from torch.nn.utils.rnn import pad_sequence
+import random
+random.seed(42)
 
 # Make mido ignore key signature
 import mido.midifiles.meta as meta
@@ -128,52 +130,40 @@ class Maestro(Song):
         else:
             raise FileNotFoundError(f"No .midi or .mid file found for {self.song_name}")
         
-         # Load midi file to get tempo
+        # Load midi file to get tempo
         midi_data = mido.MidiFile(midi_path)
         note_events = []  # To store note events with onset and offset times
-        ongoing_notes = {}  # To track ongoing notes
         cur_tempo = None
-        ticks_per_beat = midi_data.ticks_per_beat 
         midi_msgs = mido.merge_tracks(midi_data.tracks)
 
-        time_sec = 0.0  # Current time in secs
-        time_ticks = 0  # Current time in ticks
+        df = pd.DataFrame(columns=['pitch', 'onset', 'offset']) # midi_pitch, onset time and offset time in seconds
+        cur_time = 0
+        
         for msg in midi_msgs:
             if msg.type == 'set_tempo':
                 cur_tempo = msg.tempo
                 continue
-                            
+
             if (cur_tempo == None and msg.time != 0) or cur_tempo != None:
                 if (cur_tempo == None and msg.time != 0):
                     with open('MIDI_WO_TEMPO', 'a') as f:
                         f.write(self.song_name + '\n')
                     cur_tempo = 500000 # Set tempo to 120 bpm
-                time_sec += mido.tick2second(msg.time, ticks_per_beat=ticks_per_beat, tempo=cur_tempo)  # Accumulate time
-                time_ticks += msg.time
+        
+                cur_time += mido.tick2second(msg.time, ticks_per_beat=midi_data.ticks_per_beat, tempo=cur_tempo)
+                if msg.type == 'note_on' and msg.velocity > 0:
+                    df = pd.concat([df, pd.DataFrame([{'pitch': msg.note, 'onset': cur_time}])], ignore_index=True)
+
+                # For some god awful reason, the Maestro dataset don't use note_off events, but note_on events with velocity 0 >:((
+                elif msg.type == 'note_on' and msg.velocity == 0:
+                    # fill out the note_off event
+                    df.loc[(df['pitch'] == msg.note) & (df['offset'].isnull()), 'offset'] = cur_time
             
-            if msg.type == 'note_on' and msg.velocity > 0:
-                # Note onset
-                if msg.note not in ongoing_notes:  # Check if note is not already on
-                    ongoing_notes[msg.note] = time_sec, time_ticks
-            elif (msg.type == 'note_off') or (msg.type == 'note_on' and msg.velocity == 0):
-                # Note offset
-                if msg.note in ongoing_notes:
-                    onset_time_sec, onset_time_ticks = ongoing_notes.pop(msg.note)
-                    note_events.append({'pitch': msg.note, 
-                                        'onset': onset_time_sec, 
-                                        'offset': time_sec,
-                                        'onset_ticks': onset_time_ticks})
-                else:
-                    raise Warning(f"Note off event without a note on event at time {time_sec}")
-        # Create DataFrame
-        df = pd.DataFrame(note_events)
+            if self.sanity_check:
+                if df['offset'].isnull().any():
+                    raise ValueError('Missing note_off event from Maestro preprocessing')
         
-        # Onset_ticks is only used to avoid rounding errors
-        df_sorted = df.sort_values(by=['onset_ticks', 'pitch'], ascending=[True, True])
-        
-        df_final = df_sorted[['pitch', 'onset', 'offset']]
-        
-        return df_final
+        return df
                 
                 
     def compute_labels_and_segments(self, df, spectrogram, sequence_length: Optional[Union[str,int]] = 'random'):
@@ -319,60 +309,12 @@ class MuseScore(Song):
         # df = pd.concat([df, pd.DataFrame([{'pitch': -1, 'onset': self.score.highestTime, 'offset': self.score.highestTime}])], ignore_index=True)
         
         # ---------------------- Add notes and chords ---------------------- #  
+        self.score.stripTies(inPlace=True)
         for element in self.score.flatten().notes:
-            duration = np.array([Fraction(element.quarterLength)] * len(element.pitches))
-            ele_notes = np.array([(pi.pitch.midi, pi.tie) for pi in (element.notes if element.isChord else [element])])
 
-            # ---------------------- Handle ties ---------------------- #
-            if element.tie is not None and element.tie.type == 'start':      
-                next_note = element.next('Note')
-                next_note_offset = next_note.offset if next_note is not None else np.inf
-                next_chord = element.next('Chord')
-                next_chord_offset = next_chord.offset if next_chord is not None else np.inf
-                
-                tied_note = next_note if next_note_offset < next_chord_offset else next_chord
-                midi_and_ties = np.array([(pi.pitch.midi, pi.tie) for pi in (tied_note.notes if tied_note.isChord else [tied_note])])
-                
-                # Check if any of the note(s) in the next element matches any pitches with the start tied element 
-                # as well as if the next element contains a stop tie. This will determine when we terminate
-                pitches_matched = np.array([False if (t is not None and t.type == "start") else True for (_, t) in ele_notes])
-                overlapping_pitches = np.any([[m1 == m2 and (t2 is not None and t2.type == "stop") for (m1, t1) in ele_notes] for (m2, t2) in midi_and_ties], axis = 0)
-                
-                # Update the duration of the found tied notes
-                duration[overlapping_pitches] = duration[overlapping_pitches] + Fraction(tied_note.quarterLength)
-                pitches_matched[overlapping_pitches] = True
-                
-                # Keep going forward in the score until we encounter a stop tie with the same pitch as the start tied element
-                while not np.all(pitches_matched):
-                    if isinstance(tied_note, note.Note):
-                        next_note = tied_note.next('Note')
-                        next_note_offset = next_note.offset if next_note is not None else np.inf # We reached the end of the score
-                    else:
-                        next_chord = tied_note.next('Chord')
-                        next_chord_offset = next_chord.offset if next_chord is not None else np.inf
-                
-                    tied_note = next_note if next_note_offset < next_chord_offset else next_chord   
-                    try:                     
-                        midi_and_ties = np.array([(pi.pitch.midi, pi.tie) for pi in (tied_note.notes if isinstance(tied_note, chord.Chord) else [tied_note])])
-                    except AttributeError:
-                        raise AttributeError(f'Song {self.song_name} has a something wrong woth tie notes, getting None. Measure_number: {element.measureNumber}')
-                    overlapping_pitches = np.any([[m1 == m2 and (t2 is not None and t2.type == "stop") for (m1, t1) in ele_notes] for (m2, t2) in midi_and_ties], axis = 0)
-                    
-                    # Update the duration of the found tied notes
-                    duration[overlapping_pitches] = duration[overlapping_pitches] + Fraction(tied_note.quarterLength)
-                    pitches_matched[overlapping_pitches] = True
-                    
-                    # Look for continuing ties and update the duration
-                    continuing_pitches = np.any([[m1 == m2 and (t2 is not None and t2.type == "continue") for (m1, t1) in ele_notes] for (m2, t2) in midi_and_ties], axis = 0)
-                    if np.any(continuing_pitches):
-                        duration[continuing_pitches] = duration[continuing_pitches] + Fraction(tied_note.quarterLength)
-            
             for i, p in enumerate(element.pitches):
-                # Don't add the note if it is a tie
-                if ele_notes[i, 1] is not None and ele_notes[i, 1].type in ['continue', 'stop']:
-                    continue
                 midi_value = p.midi
-                df = pd.concat([df, pd.DataFrame([{'pitch': midi_value, 'onset': Fraction(element.offset), 'offset': Fraction(element.offset) + duration[i]}])], ignore_index=True)
+                df = pd.concat([df, pd.DataFrame([{'pitch': midi_value, 'onset': Fraction(element.offset), 'offset': Fraction(element.offset) + Fraction(element.quarterLength)}])], ignore_index=True)
         
         df = df.sort_values(by=['onset', 'pitch'])
         
@@ -415,7 +357,7 @@ class MuseScore(Song):
         cur_beat = 0
         while max_size >= min_size:
             
-            if 0 < np.round(total_duration - min_size) < max_size:
+            if 0 < np.round(float(total_duration - min_size)) < max_size:
                 # Makes sures that we cut the entire spectrogram by making max = min
                 beats_in_seq = np.round(total_duration - min_size)
             else:
@@ -437,7 +379,7 @@ class MuseScore(Song):
             sequence_beats.extend([np.round(cur_beat)]) # NOTE: This will give a little round-off error as opposed to looking up the frame_beat. However, it's necessary to preserve the grid-structure
         
         if sequence_beats[-1] != self.total_duration:
-            print(f"----- {self.song_name} doesn't align properly with beats and slicing? -----")
+            print(f"----- {self.song_name} doesn't align properly with beats and slicing? Off by {(sequence_beats[-1],self.total_duration)}-----")
         
         if verbose:
                 
@@ -462,7 +404,7 @@ class MuseScore(Song):
             sequence_label = df[(df['onset'] >= start_beat) & (df['onset'] < end_beat)]
             
             # Start any sequence with declaring which tempo is used
-            if cur_bpm != -sequence_label.iloc[0]['pitch']:
+            if sequence_label.empty or cur_bpm != -sequence_label.iloc[0]['pitch']:
                 sequence_label = pd.concat([pd.DataFrame([{'pitch': -cur_bpm, 'onset': Fraction(start_beat), 'offset': Fraction(start_beat)}]), sequence_label], ignore_index=True)
             
             # IMPORTANT: Shift the sequence times
@@ -586,3 +528,16 @@ class MuseScore(Song):
         df_onset_offset = self.compute_onset_offset_beats()
         df_labels = self.compute_labels_and_segments(df_onset_offset, spectrogram, **kwargs)
         return df_labels
+    
+    
+if __name__ == '__main__': 
+    xml_path = r'C:/University/batchelor_amt/datasets/asap_generated\Chopin_Etudes_op_25_4_xml_score.wav'
+    
+    with open(r"C:\University\batchelor_amt\Transformer\configs\preprocess_config.yaml", 'r') as f:
+        preprocess_config = yaml.safe_load(f)
+        
+    preprocess_config['output_dir'] = r'C:\University\batchelor_amt\datasets\TEST'
+    song = MuseScore(xml_path, preprocess_config)
+    song.preprocess()
+    
+    print('succes!')

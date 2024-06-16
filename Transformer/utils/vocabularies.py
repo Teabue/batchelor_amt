@@ -226,17 +226,6 @@ class VocabBeat(Vocabulary):
         tuplet_subdivision = Fraction(self.config["tuplet_subdivision"])
         sub_tup_common_beats = len(np.intersect1d(np.arange(0, 1, subdivision), np.arange(0, 1, tuplet_subdivision)))
         
-        # ---------------- In case no notes are played in the sequence --------------- #
-        # NOTE: Should downbeats be present here?
-        # TODO: What if the entire sequence is just one long ET that doesn't stop?
-        if len(df_sequence) == 0:
-            duration_token = np.floor(duration / subdivision) + (duration // tuplet_subdivision - np.floor(duration / (1/sub_tup_common_beats)))
-            token_sequence = []
-            token_sequence.append(self.vocabulary['SOS'][0].translate_value_to_token(0))
-            token_sequence.append(self.vocabulary['beat'][0].translate_value_to_token(duration_token,song_name))
-            token_sequence.append(self.vocabulary['EOS'][0].translate_value_to_token(0))
-            return token_sequence, None
-        
         # ------------------------------ Setup dataframe ----------------------------- #
         # Retrieve the initial tempo and remove from the dataframe
         tempo = -df_sequence.iloc[0]['pitch']

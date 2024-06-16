@@ -10,6 +10,10 @@ from utils.preprocess_song import Maestro, MuseScore
 import logging
 import shutil 
 from ruamel.yaml import YAML
+import traceback
+import random 
+
+random.seed(42)
 
 """
 All of this is done on the cpu :^D
@@ -54,7 +58,8 @@ class DataPreprocessor:
                 df_song.to_csv(save_path, mode='a', header=first_song,index=False)
                 first_song = False
             except Exception as e:
-                logging.error(f"Error in {song_path}: {e}")
+                tb = traceback.format_exc()
+                logging.error(f"Error in {song_path}: {e}\n{tb}")
                 continue
             
     def preprocess(self) -> None:
@@ -82,9 +87,10 @@ class DataPreprocessor:
             # Filter out files with base names that match any in the val_test_base_names set
             filtered_files = [file for file in augmented_files if not any(val_test_base in file for val_test_base in val_test_base_names)]
             
-            train.extend([os.path.join(self.config['augmented_dataset'], file) for file in filtered_files])
+            number_of_files_to_select = int(len(filtered_files) * self.config['augmented_dataset_percentage_to_use'] )
+            selected_files = random.sample(filtered_files, number_of_files_to_select)
             
-        
+            train.extend([os.path.join(self.config['augmented_dataset'], file) for file in selected_files])
         
         # Make output directories
         os.makedirs(os.path.join(self.config['output_dir'], 'train'), exist_ok=True)
