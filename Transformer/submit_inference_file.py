@@ -3,16 +3,7 @@ import os
 # Run BeatTrack model
 model = "BeatTrack"
 for fourier in ['stft', 'cqt', 'logmel']:
-    
-    # Preprocess
-    command = f'python Transformer/data_preprocessor.py --model {model} --fourier {fourier}'
-    os.system(command)
-    
     for loss in ['ce', 'cl']:
-        
-        # Train
-        command = f'python Transformer/train.py --loss {loss}'
-        os.system(command)
         
         # Run inference
         if model == 'BeatTrack':

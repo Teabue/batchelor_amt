@@ -16,17 +16,33 @@ parser = argparse.ArgumentParser(description='Process Fourier and loss arguments
 
 # Add arguments to the Fourier group
 parser.add_argument('--fourier', type=str, choices=['stft', 'cqt', 'logmel'], help="Specify the fourier preprocessing method") 
+parser.add_argument('--loss', type=str, choices=['ce', 'cl'], help="Specify the loss function") 
 
 # Parse the arguments
 args = parser.parse_args()
 
+if args.fourier == "stft":
+    fourier_arg = 'stft'
+elif args.fourier == "cqt":
+    fourier_arg = "cqt"
+elif args.fourier == "logmel":
+    fourier_arg = "logmel"
+else:
+    raise ValueError("Fourier not recognized")
+
 # Determine loss argument
-loss_arg = 'cl' if args.cl else 'ce'
+if args.loss == 'cl':
+    loss_arg = 'cl'
+elif args.loss == 'ce':
+    loss_arg = 'ce'
+else:
+    raise ValueError("Loss not recognized")
 
 inf_dir = f"inference_songs_{fourier_arg}_{loss_arg}"
 os.makedirs(inf_dir, exist_ok=True)
 
-run_folders = os.listdir("ablation/runs")
+run_folder_name = "run_a100_SOS"
+run_folders = os.listdir(run_folder_name)
 
 for run_folder in run_folders:
     

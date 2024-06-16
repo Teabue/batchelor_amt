@@ -145,8 +145,26 @@ if __name__ == '__main__':
     with open('Transformer/configs/preprocess_config.yaml', 'r') as f:
         configs = y.load(f)
     
+    # Load training config
+    with open('Transformer/configs/train_config.yaml', 'r') as f:
+        train_configs = y.load(f)
+    
     # Update preprocess_method based on the argument provided
     configs['preprocess_method'] = args.fourier
+    if args.fourier == "stft":
+        configs['n_mels'] = 1025 # NOTE: HARDCODED
+        train_configs['n_mel_bins'] = 1025 # NOTE: HARDCODED
+    
+    configs['output_specific_dir'] = args.fourier
+    train_configs['run_specific_path'] = args.fourier
+    
+    configs['output_dir'] = os.path.join(configs['output_base_dir'], configs['output_specific_dir'])
+    train_configs['run_save_path'] = os.path.join(train_configs['run_base_path'], train_configs['run_specific_path'])
+    train_configs['data_dir'] = os.path.join(os.path.dirname(train_configs['data_dir']), train_configs['run_specific_path'])
+    
+    with open('Transformer/configs/train_config.yaml', 'w') as f:
+        y.dump(train_configs, f)
+    
     configs['model'] = args.model
     
     if args.model == 'BeatTrack':
