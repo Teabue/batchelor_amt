@@ -25,7 +25,7 @@ model: 'TimeShift' #TimeShift or BeatTrack
 # -------------------------------- Directories ------------------------------- #
 # List of dataset directories
 data_dirs:
-  - /work3/s214645/dataset/asap
+  - /work3/s214655/dataset/asap
 augmented_dataset:      #/work3/s214629/data/augmented_data_generated
 
 audio_file_extensions:
@@ -40,4 +40,4 @@ midi_file_extension:
   - '.mid'
   - '.midi'
 
-output_dir: '/work3/s214645/preprocessed_data'                     # Preprocessed data will be saved to output_dir/spectrograms/ and output_dir/labels/
+output_dir: '/work3/s214655/preprocessed_data'                     # Preprocessed data will be saved to output_dir/spectrograms/ and output_dir/labels/
