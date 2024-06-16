@@ -25,14 +25,14 @@ if who_art_thou == 'dani':
     run_name = 'run_a100_SOS'
     
 elif who_art_thou == 'Helena':
-    preprocessed_data_dir = '/work3/s214645/'
+    preprocessed_data_dir = '/work3/s214655/'
     preprocessed_dataset_name = 'preprocessed_data'
 
-    dataset_dir = '/work3/s214645/dataset/'
+    dataset_dir = '/work3/s214655/dataset/'
     dataset_rel_path_to_data_dir = ['asap']
 
 
-    run_save_dir = '/work3/s214645/'
+    run_save_dir = '/work3/s214655/'
     run_name = 'run_a100_SOS'
 
 # --- Script will now automatically change all paths in the configs folder --- #

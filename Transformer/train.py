@@ -170,9 +170,7 @@ if __name__ == '__main__':
     import yaml
     
     parser = argparse.ArgumentParser(description='Train a model with specified loss function.')
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--ce', action='store_const', const='crossentropy', dest='loss', help='Use cross-entropy loss for training.')
-    group.add_argument('--cl', action='store_const', const='customloss', dest='loss', help='Use custom loss for training.')
+    parser.add_argument('--loss', type=str, choices=['ce', 'cl'], help="Specify the loss function") 
     args = parser.parse_args()
     
     pretrained_run_path = None
