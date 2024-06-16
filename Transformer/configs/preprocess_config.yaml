@@ -19,16 +19,13 @@ n_mels: 128 # number of mel bands to generate
 # List of dataset directories
 data_dirs:
   - /work3/s214629/data/asap_generated
-  - /work3/s214629/data/bachelor_musescore_generated
-  - /work3/s214629/data/hausmusik_generated
-  - /work3/s214629/data/folkopedia_generated
-  - /work3/s214629/data/ambrose-piano-tab_generated
 
-augmented_dataset: null #/work3/s214629/data/augmented_data_generated
+augmented_dataset: /work3/s214629/data/asap_augmented_data_generated
+augmented_dataset_percentage_to_use: 0.50
 
 
 audio_file_extensions: 
   - '.wav'
   - '.mp3'
 
-output_dir: '/work3/s214629/preprocessed_data/13-06-2024_TS_ambr'  # Preprocessed data will be saved to output_dir/spectrograms/ and output_dir/labels/
+output_dir: '/work3/s214629/preprocessed_data/TS_logmel'  # Preprocessed data will be saved to output_dir/spectrograms/ and output_dir/labels/

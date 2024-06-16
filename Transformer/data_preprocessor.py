@@ -5,6 +5,7 @@ from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 from itertools import cycle
 from utils.preprocess_song import Maestro
+import random
 
 
 import logging
@@ -67,7 +68,10 @@ class DataPreprocessor:
             # Filter out files with base names that match any in the val_test_base_names set
             filtered_files = [file for file in augmented_files if not any(val_test_base in file for val_test_base in val_test_base_names)]
             
-            train.extend([os.path.join(self.config['augmented_dataset'], file) for file in filtered_files])
+            number_of_files_to_select = int(len(filtered_files) * self.config['augmented_dataset_percentage_to_use'] )
+            selected_files = random.sample(filtered_files, number_of_files_to_select)
+            
+            train.extend([os.path.join(self.config['augmented_dataset'], file) for file in selected_files])
             
         
         
