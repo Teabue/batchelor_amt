@@ -50,7 +50,12 @@ class Song:
 
             spectrogram = cqt
 
-        
+        elif self.config['preprocess_method'] == 'stft':
+            stft = librosa.stft(y=x, n_fft=self.config['n_fft'], hop_length=self.config['hop_length'])
+            stft = librosa.amplitude_to_db(np.abs(stft))
+
+            spectrogram = stft
+            
         elif self.config['preprocess_method'] == 'logmel':
             mel_spectrogram = librosa.feature.melspectrogram(y=x, sr=sr, n_fft=self.config['n_fft'], hop_length=self.config['hop_length'], n_mels=self.config['n_mels'])
             log_mel_spectrogram = librosa.power_to_db(mel_spectrogram)
@@ -264,9 +269,9 @@ class MuseScore(Song):
         
         # Allow for multiple file extensions
         for song_extension in self.config['score_file_extensions']:
-            song_path_with_extension = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
+            song_path_with_extension = os.path.join(os.path.dirname(self.song_path), f"{self.song_name}{song_extension}")
             if os.path.isfile(song_path_with_extension):
-                score_path = os.path.join(os.path.dirname(self.song_path), self.song_name + '.' + song_extension)
+                score_path = os.path.join(os.path.dirname(self.song_path), f"{self.song_name}{song_extension}")
                 self.score = converter.parse(score_path)
                 break
         else:
