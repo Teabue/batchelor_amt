@@ -414,7 +414,7 @@ class MuseScore(Song):
             sequence_label = df[(df['onset'] >= start_beat) & (df['onset'] < end_beat)]
             
             # Start any sequence with declaring which tempo is used
-            if cur_bpm != -sequence_label.iloc[0]['pitch']:
+            if sequence_label.empty or cur_bpm != -sequence_label.iloc[0]['pitch']:
                 sequence_label = pd.concat([pd.DataFrame([{'pitch': -cur_bpm, 'onset': Fraction(start_beat), 'offset': Fraction(start_beat)}]), sequence_label], ignore_index=True)
             
             # IMPORTANT: Shift the sequence times
