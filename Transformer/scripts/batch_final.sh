@@ -25,8 +25,8 @@
 #BSUB -N 
 ### -- Specify the output and error file. %J is the job-id -- 
 ### -- -o and -e mean append, -oo and -eo mean overwrite -- 
-#BSUB -o FinalSubmit%J.out 
-#BSUB -e FinalSubmit%J.err 
+#BSUB -oo FinalSubmit%J.out 
+#BSUB -ee FinalSubmit%J.err 
 
 
 
