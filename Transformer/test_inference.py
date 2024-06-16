@@ -99,8 +99,7 @@ class Inference:
         iou, sens, fnr, fpr, spec = inference_stats(elements)
         
         # Append the statistics to a TSR file
-        fourier = self.pre_config['preprocess_method']
-        stat_path = os.path.join(self.output_dir, f"statistics-{fourier}")
+        stat_path = os.path.join(self.output_dir, f"statistics")
         with open(f"{stat_path}.txt", "a") as file:
             file.write(f"{self.song_name}\t{iou:.2f}\t{sens:.2f}\t{fnr:.2f}\t{fpr:.2f}\t{spec:.2f}\n")
         
@@ -244,7 +243,7 @@ class Inference:
             cur_bpm = init_bpm
             cur_frame = 0
             while cur_frame < spectrogram.shape[1]:
-                spec_slice, new_frame = song.preprocess_inference_new_song(spectrogram, cur_frame = cur_frame, bpm = cur_bpm)
+                spec_slice, new_frame = song.preprocess_inference_new_song(spectrogram = spectrogram, random_slice = False, cur_frame = cur_frame, bpm = cur_bpm)
                 spec_slice = spec_slice.T
                 spec_slice = spec_slice.to(device)
                 
@@ -482,8 +481,11 @@ class Inference:
         overlap_score.insert(0, piano)
 
         # Propose key signature
-        proposed_key = overlap_score.analyze('key')
-        ks = key.KeySignature(proposed_key.sharps)
+        try:
+            proposed_key = overlap_score.analyze('key')
+            ks = key.KeySignature(proposed_key.sharps)
+        except:
+            ks = key.KeySignature(0)
         
         overlap_score.makeAccidentals(alteredPitches = ks.alteredPitches, 
                                     overrideStatus = True, inPlace = True)
@@ -672,8 +674,11 @@ class Inference:
         print("We propose a key")
         # Change pitches to the analyzed key 
         # NOTE: If the song changes key throughout, it may screw-up the key analysis
-        proposed_key = score.analyze('key')
-        ks = key.KeySignature(proposed_key.sharps)
+        try:
+            proposed_key = score.analyze('key')
+            ks = key.KeySignature(proposed_key.sharps)
+        except:
+            ks = key.KeySignature(0) # Just set it to C major
 
         print("We update the pitches if the key has flats")
         # Only update the pitches if the key signature includes flats
@@ -726,7 +731,8 @@ class Inference:
         # Create a sheet based off of the ground truths
         sequence_events = []
         for _, row in df_gt.iterrows():
-            events = self.vocab.translate_sequence_token_to_events(row['labels'])
+            labels = json.loads(row['labels'])
+            events = self.vocab.translate_sequence_token_to_events(labels)
             sequence_events.extend(events)
         
         gt_score = self.translate_events_to_sheet_music(sequence_events, output_dir = None)   

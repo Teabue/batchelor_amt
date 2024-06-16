@@ -310,10 +310,13 @@ class MuseScore(Song):
         
         # ---------------------- Add notes and chords ---------------------- #  
         self.score.stripTies(inPlace=True)
+        self.score.stripTies(inPlace=True)
         for element in self.score.flatten().notes:
+
 
             for i, p in enumerate(element.pitches):
                 midi_value = p.midi
+                df = pd.concat([df, pd.DataFrame([{'pitch': midi_value, 'onset': Fraction(element.offset), 'offset': Fraction(element.offset) + Fraction(element.quarterLength)}])], ignore_index=True)
                 df = pd.concat([df, pd.DataFrame([{'pitch': midi_value, 'onset': Fraction(element.offset), 'offset': Fraction(element.offset) + Fraction(element.quarterLength)}])], ignore_index=True)
         
         df = df.sort_values(by=['onset', 'pitch'])
@@ -379,7 +382,7 @@ class MuseScore(Song):
             sequence_beats.extend([np.round(cur_beat)]) # NOTE: This will give a little round-off error as opposed to looking up the frame_beat. However, it's necessary to preserve the grid-structure
         
         if sequence_beats[-1] != self.total_duration:
-            print(f"----- {self.song_name} doesn't align properly with beats and slicing? Off by {(sequence_beats[-1],self.total_duration)}-----")
+            print(f"----- {self.song_name} doesn't align properly with beats and slicing? Sequence beats: {sequence_beats[-1]}, song duration: {self.total_duration} -----")
         
         if verbose:
                 

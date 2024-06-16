@@ -195,6 +195,8 @@ if __name__ == '__main__':
         with open('Transformer/configs/train_config.yaml', 'r') as f:
             config = yaml.safe_load(f)
     
+    config['run_save_path'] = os.path.join(config['run_base_path'], config['run_specific_path'], args.loss)
+    
     # Save the used configs to the run_save_path
     os.makedirs(config['run_save_path'], exist_ok=True)
     
