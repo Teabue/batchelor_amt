@@ -28,7 +28,7 @@ elif who_art_thou == 'Helena':
     preprocessed_data_dir = '/work3/s214655/'
     preprocessed_dataset_name = 'preprocessed_data'
 
-    dataset_dir = '/work3/s214655/dataset/'
+    dataset_dir = '/work3/s214655/datasets/'
     dataset_rel_path_to_data_dir = ['asap']
 
 

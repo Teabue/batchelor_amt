@@ -25,7 +25,7 @@ model: 'TimeShift' #TimeShift or BeatTrack
 # -------------------------------- Directories ------------------------------- #
 # List of dataset directories
 data_dirs:
-  - /work3/s214655/dataset/asap
+  - /work3/s214655/datasets/asap
 augmented_dataset:      #/work3/s214629/data/augmented_data_generated
 
 audio_file_extensions:
