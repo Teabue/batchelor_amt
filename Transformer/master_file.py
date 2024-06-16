@@ -14,5 +14,11 @@ for fourier in ['stft', 'cqt', 'logmel']:
         os.system(command)
         
         # Run inference
-        command = f'python Transformer/inference.py --{fourier} --{loss}'
-        os.system(command)
+        if model == 'BeatTrack':
+            command = f'python Transformer/inference.py --{fourier} --{loss}'
+            os.system(command)
+        elif model == 'TimeShift':
+            command = f'python Transformer/midi_inference.py --{fourier} --{loss}'
+            os.system(command)
+        else:
+            raise ValueError("Invalid model")

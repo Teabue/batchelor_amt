@@ -1,3 +1,4 @@
+import argparse
 import json
 import numpy as np
 import os
@@ -7,8 +8,33 @@ import yaml
 from test_midi_inference import Inference
 from utils.vocabularies import VocabTime
 
-inf_dir = "inference_songs"
-os.makedirs(inf_dir, exist_ok = True)
+# Create the parser
+parser = argparse.ArgumentParser(description='Process Fourier and loss arguments.')
+
+# Add mutually exclusive groups
+fourier_group = parser.add_mutually_exclusive_group(required=True)
+loss_group = parser.add_mutually_exclusive_group(required=True)
+
+# Add arguments to the Fourier group
+fourier_group.add_argument('--stft', action='store_true', help='Use Short-Time Fourier Transform')
+fourier_group.add_argument('--cqt', action='store_true', help='Use Constant-Q Transform')
+fourier_group.add_argument('--logmel', action='store_true', help='Use Log-Mel Spectrogram')
+
+# Add arguments to the loss group
+loss_group.add_argument('--cl', action='store_true', help='Use Custom Loss')
+loss_group.add_argument('--ce', action='store_true', help='Use Cross-Entropy Loss')
+
+# Parse the arguments
+args = parser.parse_args()
+
+# Determine Fourier argument
+fourier_arg = 'stft' if args.stft else 'cqt' if args.cqt else 'logmel'
+
+# Determine loss argument
+loss_arg = 'cl' if args.cl else 'ce'
+
+inf_dir = f"inference_midi_songs_{fourier_arg}_{loss_arg}"
+os.makedirs(inf_dir, exist_ok=True)
 
 run_folders = os.listdir("ablation/runs")
 
