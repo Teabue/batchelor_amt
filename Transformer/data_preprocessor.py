@@ -154,6 +154,14 @@ if __name__ == '__main__':
     if args.fourier == "stft":
         configs['n_mels'] = 1025 # NOTE: HARDCODED
         train_configs['n_mel_bins'] = 1025 # NOTE: HARDCODED
+    elif args.fourier == "cqt":
+        configs['n_mels'] = 100
+        train_configs['n_mel_bins'] = 100
+    elif args.fourier == "logmel":
+        configs['n_mels'] = 100
+        train_configs['n_mel_bins'] = 100
+    else:
+        raise ValueError("Did not recognize fourier argument")
     
     configs['output_specific_dir'] = args.fourier
     train_configs['run_specific_path'] = args.fourier

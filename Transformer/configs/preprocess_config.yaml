@@ -17,7 +17,7 @@ max_beats: 28 # hyperparameter: maximum number of beats to slice the audio into
 sr: 22050 # sample rate
 n_fft: 2048 # number of samples used for each fourier transform
 hop_length: 512 # hop_length. The number of samples between successive frames is n_fft - hope_length
-n_mels: 1025 # number of mel bands to generate
+n_mels: 100  # number of mel bands to generate
 
 # -------------------------------- Model ------------------------------- #
 model: 'BeatTrack' #TimeShift or BeatTrack

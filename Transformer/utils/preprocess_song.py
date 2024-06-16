@@ -319,60 +319,12 @@ class MuseScore(Song):
         # df = pd.concat([df, pd.DataFrame([{'pitch': -1, 'onset': self.score.highestTime, 'offset': self.score.highestTime}])], ignore_index=True)
         
         # ---------------------- Add notes and chords ---------------------- #  
+        self.score.stripTies(inPlace=True)
         for element in self.score.flatten().notes:
-            duration = np.array([Fraction(element.quarterLength)] * len(element.pitches))
-            ele_notes = np.array([(pi.pitch.midi, pi.tie) for pi in (element.notes if element.isChord else [element])])
 
-            # ---------------------- Handle ties ---------------------- #
-            if element.tie is not None and element.tie.type == 'start':      
-                next_note = element.next('Note')
-                next_note_offset = next_note.offset if next_note is not None else np.inf
-                next_chord = element.next('Chord')
-                next_chord_offset = next_chord.offset if next_chord is not None else np.inf
-                
-                tied_note = next_note if next_note_offset < next_chord_offset else next_chord
-                midi_and_ties = np.array([(pi.pitch.midi, pi.tie) for pi in (tied_note.notes if tied_note.isChord else [tied_note])])
-                
-                # Check if any of the note(s) in the next element matches any pitches with the start tied element 
-                # as well as if the next element contains a stop tie. This will determine when we terminate
-                pitches_matched = np.array([False if (t is not None and t.type == "start") else True for (_, t) in ele_notes])
-                overlapping_pitches = np.any([[m1 == m2 and (t2 is not None and t2.type == "stop") for (m1, t1) in ele_notes] for (m2, t2) in midi_and_ties], axis = 0)
-                
-                # Update the duration of the found tied notes
-                duration[overlapping_pitches] = duration[overlapping_pitches] + Fraction(tied_note.quarterLength)
-                pitches_matched[overlapping_pitches] = True
-                
-                # Keep going forward in the score until we encounter a stop tie with the same pitch as the start tied element
-                while not np.all(pitches_matched):
-                    if isinstance(tied_note, note.Note):
-                        next_note = tied_note.next('Note')
-                        next_note_offset = next_note.offset if next_note is not None else np.inf # We reached the end of the score
-                    else:
-                        next_chord = tied_note.next('Chord')
-                        next_chord_offset = next_chord.offset if next_chord is not None else np.inf
-                
-                    tied_note = next_note if next_note_offset < next_chord_offset else next_chord   
-                    try:                     
-                        midi_and_ties = np.array([(pi.pitch.midi, pi.tie) for pi in (tied_note.notes if isinstance(tied_note, chord.Chord) else [tied_note])])
-                    except AttributeError:
-                        raise AttributeError(f'Song {self.song_name} has a something wrong woth tie notes, getting None. Measure_number: {element.measureNumber}')
-                    overlapping_pitches = np.any([[m1 == m2 and (t2 is not None and t2.type == "stop") for (m1, t1) in ele_notes] for (m2, t2) in midi_and_ties], axis = 0)
-                    
-                    # Update the duration of the found tied notes
-                    duration[overlapping_pitches] = duration[overlapping_pitches] + Fraction(tied_note.quarterLength)
-                    pitches_matched[overlapping_pitches] = True
-                    
-                    # Look for continuing ties and update the duration
-                    continuing_pitches = np.any([[m1 == m2 and (t2 is not None and t2.type == "continue") for (m1, t1) in ele_notes] for (m2, t2) in midi_and_ties], axis = 0)
-                    if np.any(continuing_pitches):
-                        duration[continuing_pitches] = duration[continuing_pitches] + Fraction(tied_note.quarterLength)
-            
             for i, p in enumerate(element.pitches):
-                # Don't add the note if it is a tie
-                if ele_notes[i, 1] is not None and ele_notes[i, 1].type in ['continue', 'stop']:
-                    continue
                 midi_value = p.midi
-                df = pd.concat([df, pd.DataFrame([{'pitch': midi_value, 'onset': Fraction(element.offset), 'offset': Fraction(element.offset) + duration[i]}])], ignore_index=True)
+                df = pd.concat([df, pd.DataFrame([{'pitch': midi_value, 'onset': Fraction(element.offset), 'offset': Fraction(element.offset) + Fraction(element.quarterLength)}])], ignore_index=True)
         
         df = df.sort_values(by=['onset', 'pitch'])
         
@@ -437,7 +389,7 @@ class MuseScore(Song):
             sequence_beats.extend([np.round(cur_beat)]) # NOTE: This will give a little round-off error as opposed to looking up the frame_beat. However, it's necessary to preserve the grid-structure
         
         if sequence_beats[-1] != self.total_duration:
-            print(f"----- {self.song_name} doesn't align properly with beats and slicing? -----")
+            print(f"----- {self.song_name} doesn't align properly with beats and slicing? Sequence beats: {sequence_beats[-1]}, song duration: {self.total_duration} -----")
         
         if verbose:
                 
