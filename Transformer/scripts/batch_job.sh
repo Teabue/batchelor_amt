@@ -28,8 +28,6 @@
 #BSUB -o Output_%J.out 
 #BSUB -e Output_%J.err 
 
-
-
 source venv_bachelor/bin/activate
 
-python Transformer/train.py
+python Transformer/train.py --loss ce --data_dir /work3/s214629/data/preprocessed_data/logmel

@@ -1,11 +1,11 @@
 # ------------------------------- Train configs ------------------------------ #
-num_epochs: 10
+num_epochs: 30
 batch_size: 20
 lr: 0.0001
-run_save_path: /work3/s214655/run_a100_SOS\logmel # This will create a folder with run_1/losses with train_losses and val_losses as well as run_1/models
+run_save_path: /work3/s214629/runs/BT_ablation/logmel # This will create a folder with run_1/losses with train_losses and val_losses as well as run_1/models
 run_specific_path: logmel
-run_base_path: '/work3/s214655/run_a100_SOS'
-data_dir: '/work3/s214655/preprocessed_data/logmel'                  # This is the path to the preprocessed data directory
+run_base_path: /work3/s214629/runs/BT_ablation
+data_dir: /work3/s214629/data/preprocessed_data/logmel                  # This is the path to the preprocessed data directory
 seed: 42
 # -------------------------- Model specific configs -------------------------- #
 n_mel_bins: 100
