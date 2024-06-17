@@ -206,8 +206,7 @@ if __name__ == '__main__':
     import yaml
     
     parser = argparse.ArgumentParser(description='Train a model with specified loss function.')
-    parser.add_argument('--loss', type=str, choices=['ce', 'cl'], help="Specify the loss function")
-    parser.add_argument('--data_dir', type=str, help="Specify data_dir. If none, use the current train config data_dir", default=None) 
+    parser.add_argument('--loss', type=str, choices=['ce', 'cl'], help="Specify the loss function", default='ce')
     args = parser.parse_args()
     
     pretrained_run_path = None
@@ -231,9 +230,6 @@ if __name__ == '__main__':
         # Load the YAML file
         with open('Transformer/configs/train_config.yaml', 'r') as f:
             config = yaml.safe_load(f)
-            
-        if args.data_dir != None:
-            config['data_dir'] = args.data_dir
     
     config['run_save_path'] = os.path.join(config['run_base_path'], config['run_specific_path'], args.loss)
     

@@ -58,8 +58,9 @@ class DataPreprocessor:
                 df_song.to_csv(save_path, mode='a', header=first_song,index=False)
                 first_song = False
             except Exception as e:
-                tb = traceback.format_exc()
-                logging.error(f"Error in {song_path}: {e}\n{tb}")
+                # tb = traceback.format_exc()
+                # logging.error(f"Error in {song_path}: {e}\n{tb}")
+                logging.error(f"Error in {song_path}: {e}")
                 continue
             
     def preprocess(self) -> None:

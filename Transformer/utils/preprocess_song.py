@@ -9,8 +9,8 @@ import torch
 from fractions import Fraction
 from music21 import *
 from typing import Optional, Union
-from vocabularies import VocabTime, VocabBeat
-from song_check import fermata_check
+from utils.vocabularies import VocabTime, VocabBeat
+from .song_check import fermata_check
 from torch.nn.utils.rnn import pad_sequence
 import random
 random.seed(42)
@@ -358,6 +358,7 @@ class MuseScore(Song):
 
         # Initialize a list to store the chunk sizes
         cur_beat = 0
+        prev_beat = None
         while max_size >= min_size:
             
             if 0 < np.round(float(total_duration - min_size)) < max_size:
@@ -379,8 +380,11 @@ class MuseScore(Song):
             
             # Add the frame to the indices
             indices.extend([frame])
+            if cur_beat == prev_beat:
+                raise ValueError(f"Something is wrong with the XML song so that sequnce_beats would get repeated beats looping into infinity and beyond.")
             sequence_beats.extend([np.round(cur_beat)]) # NOTE: This will give a little round-off error as opposed to looking up the frame_beat. However, it's necessary to preserve the grid-structure
-        
+            prev_beat = cur_beat
+            
         if sequence_beats[-1] != self.total_duration:
             print(f"----- {self.song_name} doesn't align properly with beats and slicing? Sequence beats: {sequence_beats[-1]}, song duration: {self.total_duration} -----")
         
