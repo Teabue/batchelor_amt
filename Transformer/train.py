@@ -30,12 +30,14 @@ def train_model(model,
     
     TRAIN_LOSS_PATH = os.path.join(LOSS_SAVE_DIR, 'train_losses.txt')
     VAL_LOSS_PATH = os.path.join(LOSS_SAVE_DIR, 'val_losses.txt')
-    
+    TEST_LOSS_PATH = os.path.join(LOSS_SAVE_DIR, 'test_losses.txt')
     with open(TRAIN_LOSS_PATH, 'w') as f:
         f.write('Epoch, Loss\n')
     with open(VAL_LOSS_PATH, 'w') as f:
         f.write('Epoch, Loss\n')
-    
+    with open(TEST_LOSS_PATH, 'w') as f:
+        f.write('Epoch, Loss\n')
+        
     best_loss = float('inf')
     for epoch in range(num_epochs):
         
@@ -116,6 +118,43 @@ def train_model(model,
         if mean_val_loss < best_loss:
             best_loss = mean_val_loss
             torch.save(model.state_dict(), os.path.join(MODEL_SAVE_DIR, f'model_best.pth'))  
+            
+            
+        # --------------------------------- Test loss -------------------------------- #
+
+        test_loader = dataset.get_split('test', batch_size=batch_size, shuffle=True)
+        pbar = tqdm.tqdm(iter(test_loader), total = len(test_loader), \
+                        desc=f'Loss: [{1}], Epochs: {epoch}/{num_epochs}')
+        
+        model.eval()
+        
+        test_losses = []
+        for i, (spectrograms, tokens) in enumerate(pbar):
+            spectrograms = spectrograms.to(device)
+            tokens = tokens.to(device)
+            if i > 200:
+                break
+                
+            outputs = model(src=spectrograms, tgt=tokens[:, :-1])
+            
+            loss = criterion(outputs.contiguous().view(-1, tgt_vocab_size), tokens[:, 1:].contiguous().view(-1))
+            if device.type == 'cuda':
+                pbar.set_description(f'Test Loss: [{loss.item():.4f}], Epochs: {epoch}/{num_epochs}, GPU Memory: {torch.cuda.memory_allocated()/1e9:.2f}GB')
+            else:
+                pbar.set_description(f'Test Loss: [{loss.item():.4f}], Epochs: {epoch}/{num_epochs}')
+            test_losses.append(loss.item())
+            
+            # Don't mind me trying to free memory
+            del outputs, loss, spectrograms, tokens
+        
+        # Save model if loss is better
+        mean_test_loss = np.mean(test_losses)
+        
+        # Save validation loss
+        with open(TEST_LOSS_PATH, 'a') as f:
+            f.write(f'{epoch}, {mean_test_loss}\n')
+
+
 
 
 def simple_setup(device = 'cuda', 

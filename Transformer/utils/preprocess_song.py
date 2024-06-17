@@ -132,19 +132,8 @@ class Maestro(Song):
             if self.sanity_check:
                 if df['offset'].isnull().any():
                     raise ValueError('Missing note_off event from Maestro preprocessing')
-            
-            return df
-
-
-        # Create DataFrame
-        df = pd.DataFrame(note_events)
         
-        # Onset_ticks is only used to avoid rounding errors
-        df_sorted = df.sort_values(by=['onset_ticks', 'pitch'], ascending=[True, True])
-        
-        df_final = df_sorted[['pitch', 'onset', 'offset']]
-        
-        return df_final
+        return df
                 
                 
     def compute_labels_and_segments(self, df, spectrogram, sequence_length: Optional[Union[str,int]] = 'random') -> pd.DataFrame:
