@@ -16,7 +16,7 @@ def get_run_losses(run_folder_paths):
             
         run_train_losses = pd.read_csv(os.path.join(run_folder, 'losses', 'train_losses.txt'))
         # TODO: IN FUTURE: CHANGE THIS TO TEST LOSSES
-        run_test_losses = pd.read_csv(os.path.join(run_folder, 'losses', 'val_losses.txt'))  
+        run_test_losses = pd.read_csv(os.path.join(run_folder, 'losses', 'test_losses.txt'))  
         
         run_train_losses = run_train_losses[' Loss'].astype(float).tolist() # I shall sin for this ' Loss' key, but oh well
         run_test_losses = run_test_losses[' Loss'].astype(float).tolist()
