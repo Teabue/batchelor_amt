@@ -6,7 +6,7 @@ import mido
 import yaml
 import torch
 from typing import Optional, Union
-from vocabularies import Vocabulary
+from utils.vocabularies import Vocabulary
 from torch.nn.utils.rnn import pad_sequence
 from collections import defaultdict
 
