@@ -28,13 +28,13 @@
 #BSUB -o FinalSubmit%J.out 
 #BSUB -e FinalSubmit%J.err 
 
+source venv_bachelor/bin/activate
 
+# source ../venv_bachelor/bin/activate
 
-source ../venv_bachelor/bin/activate
-
-module load python3/3.10.13
-module load pandas
-module load numpy
-module load yaml-cpp/0.5.3 
+# module load python3/3.10.13
+# module load pandas
+# module load numpy
+# module load yaml-cpp/0.5.3 
 
 python Transformer/master_file.py

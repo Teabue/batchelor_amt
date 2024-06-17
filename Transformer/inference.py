@@ -12,7 +12,7 @@ import os
 inf_dir = "inference_songs"
 os.makedirs(inf_dir, exist_ok=True)
 
-run_folder_name = "/work3/s214655/run_a100_SOS"
+run_folder_name = "/work3/s214629/runs/FINAL_ABLATION"
 
 for fourier_folder in os.listdir(run_folder_name):
     outer_folder = os.path.join(inf_dir, fourier_folder)
