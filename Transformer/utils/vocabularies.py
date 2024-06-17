@@ -61,6 +61,12 @@ class Vocabulary:
         
         # Set special tokens
         for special_token in self.config['special_tokens']:
+            
+            # Time shift model shouldn't have downbeat in the vocab
+            if special_token == 'downbeat':
+                if self.type == "time":
+                    continue
+            
             token_offset = self._define_event(token_offset, special_token, (0,0))
 
         for event_type, min_max_values  in self.config['event_types'].items():
@@ -69,10 +75,17 @@ class Vocabulary:
                 if self.type == "beat":
                     min_max_values = [1, h_bars * 12]
                 else:
+                    # Time shift shouldn't have beat in the vocab
                     continue
             
-            elif event_type == 'time':
+            # Beat track model shouldn't have time shift in the vocab
+            elif event_type == 'time_shift':
                 if self.type == "beat":
+                    continue
+            
+            # Time shift shouldn't have tempo or downbeat in the vocab
+            elif event_type == 'tempo':
+                if self.type == "time":
                     continue
                 
             token_offset = self._define_event(token_offset, event_type, min_max_values)
@@ -356,7 +369,7 @@ if __name__ == "__main__":
         vocab = VocabTime(config)
         vocab.define_vocabulary()
     elif p_config['model'] == "BeatTrack":
-        vocab = Vocabulary(config)
+        vocab = VocabBeat(config)
         vocab.define_vocabulary(p_config['max_beats'])
     
     print("Vocabulary ranges: ")
