@@ -1,3 +1,4 @@
+import json
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -74,8 +75,7 @@ class Inference:
         iou, sens, fnr, fpr, spec = inference_stats(gt_events, pred_events)
         
         # Append the statistics to a TSR file
-        fourier = self.pre_config['preprocess_method']
-        stat_path = os.path.join(self.output_dir, f"statistics-{fourier}")
+        stat_path = os.path.join(self.output_dir, f"statistics")
         with open(f"{stat_path}.txt", "a") as file:
             file.write(f"{self.song_name}\t{iou:.2f}\t{sens:.2f}\t{fnr:.2f}\t{fpr:.2f}\t{spec:.2f}\n")
         
@@ -176,14 +176,14 @@ class Inference:
             sequence_events = []
             
             # ----------------------------- Slice spectrogram dynamically ----------------------------- #
-            spec_slices = song.preprocess_inference_new_song()
+            spec_slices = song.preprocess_inference_new_song(random_slice = True)
             
             for seq_spec in spec_slices:
                 # torch.tensor([[1]]) because SOS token is 1 
                 output = model.get_sequence_predictions(seq_spec.unsqueeze(0), torch.tensor([[1]], device=device), self.pre_config['max_sequence_length'])
                 output = output.squeeze()
                 events = self.vocab.translate_sequence_token_to_events(output.tolist())
-                sequence_events.extend(events)
+                sequence_events.append(events)
             
             os.makedirs(os.path.join(self.output_dir, 'seq_predictions'), exist_ok=True)        
             
@@ -196,67 +196,64 @@ class Inference:
         if not just_save_seq:
             output_dir = os.path.join(self.output_dir, 'midi_predictions')
             os.makedirs(output_dir, exist_ok=True)   
-            return self.create_midi_from_model_events(sequence_events, init_bpm, output_dir)
+            return self.create_midi_from_model_events(sequence_events, init_bpm, output_dir, output_name = self.song_name)
     
-    def create_midi_from_model_events(self, events, bpm_tempo, output_dir = None, onset_only=False):
+    def create_midi_from_model_events(translated_sequences, bpm_tempo, output_dir='', onset_only=False, output_name='output'):
         """Don't use onset_only, it's truly shit
         """
         mid = MidiFile()
         track = MidiTrack()
         mid.tracks.append(track)
         tempo = bpm2tempo(bpm_tempo)
-        track.append(MetaMessage('key_signature', key='A'))
+        # track.append(MetaMessage('key_signature', key='A'))
         track.append(MetaMessage('set_tempo', tempo=tempo))
         track.append(MetaMessage('time_signature', numerator=4, denominator=4))
-
-        note_events = set()  # To store note events with onset and offset times
-        ongoing_notes = defaultdict(list)  # To track ongoing notes
-        delta_time = 0
-        offset_onset = None
-        for event in events:
-            if event[0] == 'PAD' or event[0] == 'SOS' or event[0] == 'ET':
-                continue
-            elif event[0] == 'EOS':
-                offset_onset = None
-            elif event[0] == 'time_shift':
-                delta_time += int(round(second2tick(int(event[1])/100, mid.ticks_per_beat, tempo)))
-            elif event[0] == 'offset_onset':
-                offset_onset = int(event[1])
-            elif event[0] == 'pitch':
-                if offset_onset is None:
-                    # These pitches are from before the ET token
-                    continue
-                if offset_onset == 0:
-                    # Just a glorified note-off event. I'm doing this because maestro did it first >:(
-                    if not onset_only:
-                        track.append(Message('note_off', channel=1, note=int(event[1]), velocity=64, time=delta_time))
-                        
-                        if int(event[1]) in ongoing_notes.keys():
-                            # Take the last offset and delete it from the dict
-                            event_onset = ongoing_notes[int(event[1])].pop()
-                            note_events.add((event_onset, delta_time, int(event[1])))
-                        
-                elif offset_onset == 1:
-                    if onset_only:
-                        track.append(Message('note_on', channel=1, note=int(event[1]), velocity=100, time=delta_time))
-                        track.append(Message('note_off', channel=1, note=int(event[1]), velocity=100, time=delta_time+128))
-                    else:
-                        track.append(Message('note_on', channel=1, note=int(event[1]), velocity=100, time=delta_time))
-                        
-                        if int(event[1]) not in ongoing_notes.keys():
-                            # Add onset to list
-                            ongoing_notes[int(event[1])].append(delta_time)
-                else:
-                    raise ValueError('offset_onset should be 0 or 1')
+        
+        for events in translated_sequences:
+            delta_time = 0
+            offset_onset = None
+            et_processed = True
+            # Check for ET first
+            for event in events:
+                if event[0] == 'ET':
+                    et_processed = False
+                    break 
                 
-                delta_time = 0
+            for event in events:
+                if event[0] == 'PAD' or event[0] == 'SOS' or event[0] == 'ET':
+                    if event[0] == 'ET':
+                        et_processed = True
+                    continue
+                elif not et_processed:
+                    continue
+                elif event[0] == 'EOS':
+                    offset_onset = None
+                elif event[0] == 'time_shift':
+                    delta_time += second2tick(event[1]/100, mid.ticks_per_beat, tempo)
+                elif event[0] == 'offset_onset':
+                    offset_onset = event[1]
+                elif event[0] == 'pitch':
+                    if offset_onset is None:
+                        # These pitches are from before the ET token
+                        continue
+                    if offset_onset == 0:
+                        # Just a glorified note-off event. I'm doing this because maestro did it first >:(
+                        if not onset_only:
+                            track.append(Message('note_off', channel=1, note=event[1], velocity=64, time=delta_time))
+                    elif offset_onset == 1:
+                        if onset_only:
+                            track.append(Message('note_on', channel=1, note=event[1], velocity=100, time=delta_time))
+                            track.append(Message('note_off', channel=1, note=event[1], velocity=100, time=delta_time+128))
+                        else:
+                            track.append(Message('note_on', channel=1, note=event[1], velocity=100, time=delta_time))
+                    else:
+                        raise ValueError('offset_onset should be 0 or 1')
+                    
+                    delta_time = 0
 
         track.append(MetaMessage('end_of_track'))
 
-        if output_dir is not None:
-            mid.save(os.path.join(output_dir, f"{self.song_name}.midi"))
-        
-        return mid, note_events
+        mid.save(os.path.join(output_dir, output_name + '.midi'))
        
     def preprocess_ground_truth(self, init_bpm: int, new_song: bool = False):
         
@@ -276,7 +273,8 @@ class Inference:
         # Create a sheet based off of the ground truths
         sequence_events = []
         for _, row in df_gt.iterrows():
-            events = self.vocab.translate_sequence_token_to_events(row['labels'])
+            labels = json.loads(row['labels'])
+            events = self.vocab.translate_sequence_token_to_events(labels)
             sequence_events.extend(events)
         
         gt_score, gt_events = self.create_midi_from_model_events(sequence_events, init_bpm = init_bpm) 
