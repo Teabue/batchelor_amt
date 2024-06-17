@@ -6,7 +6,7 @@ import mido
 import yaml
 import torch
 from typing import Optional, Union
-from utils.vocabularies import Vocabulary
+from vocabularies import Vocabulary
 from torch.nn.utils.rnn import pad_sequence
 from collections import defaultdict
 
@@ -125,7 +125,7 @@ class Maestro(Song):
                     df = pd.concat([df, pd.DataFrame([{'pitch': msg.note, 'onset': cur_time}])], ignore_index=True)
 
                 # For some god awful reason, the Maestro dataset don't use note_off events, but note_on events with velocity 0 >:((
-                elif msg.type == 'note_on' and msg.velocity == 0:
+                elif (msg.type == 'note_on' and msg.velocity == 0) or msg.type == 'note_off':
                     # fill out the note_off event
                     df.loc[(df['pitch'] == msg.note) & (df['offset'].isnull()), 'offset'] = cur_time
             
@@ -223,3 +223,7 @@ class Maestro(Song):
         df_labels = self.compute_labels_and_segments(df_onset_offset, spectrogram, sequence_length=self.config['sequence_length'])
         return df_labels
 
+if __name__ == '__main__':
+    song_path = r'C:\University\batchelor_amt\datasets\music21_generated\_bwv48.3.wav'
+    midi = Maestro(song_path, {'preprocess_method': 'logmel', 'sr': 22050, 'n_mels': 128, 'n_fft': 2048, 'hop_length': 512, 'max_sequence_length': 128, 'output_dir': r'C:\University\batchelor_amt\datasets\TEEEEEEEEEST'})
+    midi.preprocess()
