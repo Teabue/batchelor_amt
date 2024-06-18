@@ -185,62 +185,85 @@ class PositionalEncoding(nn.Module):
 
     
 if __name__ == "__main__":
+    from vocabularies import VocabBeat, VocabTime
     import yaml
-    import tqdm
-    from utils.vocabularies import VocabBeat, VocabTime
-    from utils.data_loader import TransformerDataset
-    
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    
-    n_mel_bins = 128
+    num_epochs = 20
+    batch_size =  16
+    lr = 0.0001                             # This is the path to the preprocessed data directory
+    seed = 42
+    n_mel_bins = 100
     d_model = 512
     num_heads = 8
     num_layers = 6
     d_ff = 2048
-    max_seq_length = 256 # doesn't really matter, can be set to whatever as long as its larger than the longest sequence - it's a pteprocess step for PE
+    max_seq_length = 4096 # 1024 # doesn't really matter, can be set to whatever as long as its larger than the longest sequence - it's a pteprocess step for PE
     dropout = 0.1
-
-    with open('Transformer/configs/preprocess_config.yaml', 'r') as file:
-        p_config = yaml.safe_load(file)
-
-    with open('Transformer/configs/vocab_config.yaml', 'r') as file:
-        config = yaml.safe_load(file)
     
-    if p_config['model'] == "TimeShift":
-        vocab = VocabTime(config)
-        vocab.define_vocabulary()
-    elif p_config['model'] == "BeatTrack":
-        vocab = VocabBeat(config)
-        vocab.define_vocabulary(p_config['max_beats'])
-    else:
-        raise ValueError('Model type not recognized')
+    with open(r'C:\University\batchelor_amt\Transformer\configs\vocab_config.yaml') as f:
+        config = yaml.safe_load(f)
     
+    vocab = VocabTime(config)
+    vocab.define_vocabulary()
     tgt_vocab_size = vocab.vocab_size
     
+    model = Transformer(n_mel_bins, tgt_vocab_size, d_model, num_heads, num_layers, d_ff, max_seq_length, dropout, device='cpu')
+    print(2)
+    # import yaml
+    # import tqdm
+    # from utils.vocabularies import VocabBeat, VocabTime
+    # from utils.data_loader import TransformerDataset
     
-    transformer = Transformer(n_mel_bins, tgt_vocab_size, d_model, num_heads, num_layers, d_ff, max_seq_length, dropout)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(transformer.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
-    dataset = TransformerDataset(r'/work3/s214629/preprocessed_data_old')
+    # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # n_mel_bins = 128
+    # d_model = 512
+    # num_heads = 8
+    # num_layers = 6
+    # d_ff = 2048
+    # max_seq_length = 256 # doesn't really matter, can be set to whatever as long as its larger than the longest sequence - it's a pteprocess step for PE
+    # dropout = 0.1
 
-    transformer.train()
+    # with open('Transformer/configs/preprocess_config.yaml', 'r') as file:
+    #     p_config = yaml.safe_load(file)
 
-    num_epochs = 50
-    batch_size = 20
-    for epoch in range(100):
+    # with open('Transformer/configs/vocab_config.yaml', 'r') as file:
+    #     config = yaml.safe_load(file)
+    
+    # if p_config['model'] == "TimeShift":
+    #     vocab = VocabTime(config)
+    #     vocab.define_vocabulary()
+    # elif p_config['model'] == "BeatTrack":
+    #     vocab = VocabBeat(config)
+    #     vocab.define_vocabulary(p_config['max_beats'])
+    # else:
+    #     raise ValueError('Model type not recognized')
+    
+    # tgt_vocab_size = vocab.vocab_size
+    
+    
+    # transformer = Transformer(n_mel_bins, tgt_vocab_size, d_model, num_heads, num_layers, d_ff, max_seq_length, dropout)
+    # criterion = nn.CrossEntropyLoss()
+    # optimizer = optim.Adam(transformer.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
+    # dataset = TransformerDataset(r'/work3/s214629/preprocessed_data_old')
+
+    # transformer.train()
+
+    # num_epochs = 50
+    # batch_size = 20
+    # for epoch in range(100):
             
-        train_loader = dataset.get_split('train', batch_size=batch_size, shuffle=True)
-        pbar = tqdm.tqdm(train_loader, total = len(train_loader), \
-                         desc=f'Train: Loss: [{1}], Epochs: {epoch}/{num_epochs}', leave = False)    
+    #     train_loader = dataset.get_split('train', batch_size=batch_size, shuffle=True)
+    #     pbar = tqdm.tqdm(train_loader, total = len(train_loader), \
+    #                      desc=f'Train: Loss: [{1}], Epochs: {epoch}/{num_epochs}', leave = False)    
 
-        optimizer.zero_grad()
-        losses = []
-        for spectrograms, tokens in pbar:#iter(train_loader):
-            spectrograms = spectrograms.to(device)
-            tokens = tokens.to(device)
+    #     optimizer.zero_grad()
+    #     losses = []
+    #     for spectrograms, tokens in pbar:#iter(train_loader):
+    #         spectrograms = spectrograms.to(device)
+    #         tokens = tokens.to(device)
             
-            output = transformer(src=spectrograms, tgt=tokens)
-            loss = criterion(output.contiguous().view(-1, tgt_vocab_size), tokens.contiguous().view(-1))
-            loss.backward()
-            optimizer.step()
-            print(f"Epoch: {epoch+1}, Loss: {loss.item()}")
+    #         output = transformer(src=spectrograms, tgt=tokens)
+    #         loss = criterion(output.contiguous().view(-1, tgt_vocab_size), tokens.contiguous().view(-1))
+    #         loss.backward()
+    #         optimizer.step()
+    #         print(f"Epoch: {epoch+1}, Loss: {loss.item()}")
