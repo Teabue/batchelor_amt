@@ -29,13 +29,13 @@ class EventType:
         return self.end_token + 1 
     
     def translate_token_to_value(self, token):
-        if not token >= self.token_start and token <= self.end_token:
+        if not (token >= self.token_start and token <= self.end_token):
             raise ValueError('Token out of range')
         
         return int(token - self.token_start + self.min_max_values[0]) # NOTE: Assume only integer values for now
     
     def translate_value_to_token(self, value, song_name: str = 'Song_name_not_given'):
-        if not value >= self.min_max_values[0] and value <= self.min_max_values[1]:
+        if not (value >= self.min_max_values[0] and value <= self.min_max_values[1]):
             raise ValueError(f'[ERROR] Vocabulary: Value {value} out of range for event {self.event_type} for song {song_name}')
         
         return int(value - self.min_max_values[0] + self.token_start)
@@ -71,15 +71,15 @@ class Vocabulary:
 
         for event_type, min_max_values  in self.config['event_types'].items():
             # Small hack for adjusting beat tokens depending on h_bars
-            if event_type == 'beat' and min_max_values == 'None':
-                if self.type == "beat":
-                    min_max_values = [1, h_bars * 12]
-                else:
-                    # Time shift shouldn't have beat in the vocab
-                    continue
+            # if event_type == 'beat' and min_max_values == 'None':
+            #     if self.type == "beat":
+            #         min_max_values = [1, h_bars * 12]
+            #     else:
+            #         # Time shift shouldn't have beat in the vocab
+            #         continue
             
             # Beat track model shouldn't have time shift in the vocab
-            elif event_type == 'time_shift':
+            if event_type == 'time_shift':
                 if self.type == "beat":
                     continue
             

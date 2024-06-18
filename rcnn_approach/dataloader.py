@@ -44,15 +44,17 @@ class Dataset(torch.utils.data.Dataset):
         else:
             aud, sr = librosa.load(audio_path, sr=audio_sr)
             
-            if audio_transform == 'cqt':
-                aud = librosa.cqt(aud, sr=audio_sr, hop_length=audio_hop_length)
-            elif audio_transform == 'stft':
-                aud = librosa.stft(aud, sr=audio_sr, hop_length=audio_hop_length)
+            if audio_transform == 'cqt' or audio_transform == 'stft':
+                if audio_transform == 'cqt':
+                    aud = librosa.cqt(aud, sr=audio_sr, hop_length=audio_hop_length)
+                elif audio_transform == 'stft':
+                    aud = librosa.stft(aud, sr=audio_sr, hop_length=audio_hop_length)
+                aud = librosa.amplitude_to_db(np.abs(aud), ref=np.max)
+            elif audio_transform == 'logmel':
+                aud = librosa.feature.melspectrogram(aud, sr=audio_sr, hop_length=audio_hop_length)
+                aud = librosa.power_to_db(aud, ref=np.max)
             else:
                 ValueError("Invalid choice of preprocess method.")
-                
-            aud = librosa.amplitude_to_db(np.abs(aud), ref=np.max)
-            
             # Get segment
             seg_aud = aud[:, segment_start_idx:segment_end_idx]
             

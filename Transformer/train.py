@@ -37,6 +37,8 @@ def train_model(model,
         f.write('Epoch, Loss\n')
     with open(VAL_LOSS_PATH, 'w') as f:
         f.write('Epoch, Loss\n')
+    with open(TEST_LOSS_PATH, 'w') as f:
+        f.write('Epoch, Loss\n')
     
     best_loss = float('inf')
     for epoch in range(num_epochs):
@@ -187,6 +189,9 @@ def simple_setup(device = 'cuda',
     
     tgt_vocab_size = vocab.vocab_size
     
+    print(f'Vocabulary size {tgt_vocab_size}')
+    print(f'Vocab: {vocab.vocabulary}')
+    
     model = Transformer(n_mel_bins, tgt_vocab_size, d_model, num_heads, num_layers, d_ff, max_seq_length, dropout, device)
     if pretrained_run_path != None:
         model.load_state_dict(torch.load(os.path.join(pretrained_run_path,'models','model_best.pth')))
@@ -209,7 +214,7 @@ if __name__ == '__main__':
     parser.add_argument('--loss', type=str, choices=['ce', 'cl'], help="Specify the loss function", default='ce')
     args = parser.parse_args()
     
-    pretrained_run_path = None
+    pretrained_run_path = None #'/work3/s214629/runs/FINAL_ABLATION/cqt/cl_cont-00001_cont'
     data_parallelism = False
     
     # SET THIS, I'M TOO LAZY TO ARGUMENT PARSE
@@ -220,8 +225,9 @@ if __name__ == '__main__':
             config = yaml.safe_load(f)
 
         # CHANGE NEEDED SETTINGS HERE
-        config['run_save_path'] = '/work3/s214629/runs/05-06-24_time_shift_gen-audio_aug_cont_00001'
-        config['num_epochs'] = 69
+        config['run_save_path'] = '/work3/s214629/runs/FINAL_ABLATION/cqt/cl_cont-00001_cont_cont'
+        config['num_epochs'] = 20
+        config['batch_size'] = 3
         config['seed'] = config['seed'] + 33 # We need to set to something else so the batches won't be identical
         config['lr'] = 0.00001
         if data_parallelism:
@@ -231,7 +237,8 @@ if __name__ == '__main__':
         with open('Transformer/configs/train_config.yaml', 'r') as f:
             config = yaml.safe_load(f)
     
-    config['run_save_path'] = os.path.join(config['run_base_path'], config['run_specific_path'], args.loss)
+    #WEEEEEEEEEEEEE
+    # config['run_save_path'] = os.path.join(config['run_base_path'], config['run_specific_path'], args.loss)
     
     # Save the used configs to the run_save_path
     os.makedirs(config['run_save_path'], exist_ok=True)
@@ -260,7 +267,8 @@ if __name__ == '__main__':
     if args.loss == 'ce':
         criterion = nn.CrossEntropyLoss(ignore_index=0)
     elif args.loss == 'cl':
-        criterion = CustomLoss(vocab).compute_loss
+        os.makedirs('train_logs', exist_ok=True)
+        criterion = CustomLoss(vocab, logger_folder='train_logs').compute_loss
     else:
         raise ValueError('Loss function not recognized')
     

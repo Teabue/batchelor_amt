@@ -9,6 +9,8 @@ import pandas as pd
 from typing import List
 import tqdm
 import cv2
+import multiprocessing
+from functools import partial
 
 
 class Data_Preprocessor():
@@ -63,15 +65,21 @@ class Data_Preprocessor():
         aud_path = os.path.join(audio_name + self.audio_format)
         
         aud, _ = librosa.load(aud_path, sr=self.sr)
-        
-        if self.transform == "cqt":
-            aud = librosa.cqt(aud, sr=self.sr, hop_length=self.hop_length) 
-        elif self.transform == "stft":
-            aud = librosa.stft(aud, sr=self.sr, hop_length=self.hop_length)
+            
+        if self.transform == 'cqt' or self.transform == 'stft':
+            if self.transform == 'cqt':
+                aud = librosa.cqt(aud, sr=self.sr, hop_length=self.hop_length)
+            elif self.transform == 'stft':
+                aud = librosa.stft(aud, sr=self.sr, hop_length=self.hop_length)
+            aud = librosa.amplitude_to_db(np.abs(aud), ref=np.max)
+            
+        elif self.transform == 'logmel':
+            aud = librosa.feature.melspectrogram(y=aud, sr=self.sr, hop_length=self.hop_length, n_mels=100)
+            aud = librosa.power_to_db(aud)
         else:
             ValueError("Invalid choice of preprocess method.")
         
-        return librosa.amplitude_to_db(np.abs(aud), ref=np.max)
+        return aud
     
     def audio_get_onsets(self, aud: np.ndarray):
         """Librosa implementation of onset detection.
@@ -178,26 +186,34 @@ class Data_Preprocessor():
         cv2.imwrite(img_path, img)
         return img_path
     
+    def process_files(self, split_name, split_files):
+        df_preprocessed_data = pd.DataFrame(columns=['audio_path','audio_sr', 'audio_hop_length', 'audio_transform', 'audio_tempo', 'segment_start_idx', 'segment_end_idx(not_including)', 'segment_midi_pitches', 'segment_img_path', 'onset'])
+        for audio_name in tqdm.tqdm(split_files, total=len(split_files)):
+            S_db = self.audio_get_transformed(audio_name)
+            onset_frames = self.audio_get_onsets(S_db)
+            ground_truths = self.audio_get_ground_truth(audio_name, S_db)
+            tempo = self.audio_get_tempo(audio_name)
+            df_preprocessed_data = self.audio_concat_segments(tempo, S_db, onset_frames, ground_truths, df_preprocessed_data, audio_name, split_name)
+        return df_preprocessed_data
+    
     # ---------------------------------------------------------------------------- #
     #                     Call this function to preprocess data                    #
     # ---------------------------------------------------------------------------- #
-    def save_preprocessed_data(self):
+    def save_preprocessed_data_multiprocess(self):
         split_names = ["train", "val", "test"]
         splits = self.get_splits()
-        
+        num_processes = multiprocessing.cpu_count()
+
         for split_name, split_files in zip(split_names, splits):
-            df_preprocessed_data = pd.DataFrame(columns=['audio_path','audio_sr', 'audio_hop_length', 'audio_transform', 'audio_tempo', 'segment_start_idx', 'segment_end_idx(not_including)', 'segment_midi_pitches', 'segment_img_path', 'onset'])
-            
-            print(f"Preprocessing {split_name} split")
-            for audio_name in tqdm.tqdm(split_files, total=len(split_files)):
-                S_db = self.audio_get_transformed(audio_name)
-                onset_frames = self.audio_get_onsets(S_db)
-                ground_truths = self.audio_get_ground_truth(audio_name, S_db)
-                tempo = self.audio_get_tempo(audio_name)
-                
-                df_preprocessed_data =  self.audio_concat_segments(tempo, S_db, onset_frames, ground_truths, df_preprocessed_data, audio_name, split_name)
-                
-            df_preprocessed_data.to_csv(os.path.join(self.output_dir, f'{split_name}.csv'), index=False)
+            with multiprocessing.Pool(processes=num_processes) as pool:
+                chunk_size = int(len(split_files) / num_processes)
+                split_files_chunks = [split_files[i:i + chunk_size] for i in range(0, len(split_files), chunk_size)]
+                process_partial = partial(self.process_files, split_name)
+                results = pool.map(process_partial, split_files_chunks)
+
+                # Combine results from all processes
+                combined_df = pd.concat(results, ignore_index=True)
+                combined_df.to_csv(os.path.join(self.output_dir, f'{split_name}.csv'), index=False)
     
 
 
@@ -212,8 +228,10 @@ class MAPS_Preprocessor(Data_Preprocessor):
         # MAPS files
         self.audio_format = ".wav"
         
-        data_folder = self.config['MAPS_datapath']
-        self.files = [y.replace('.wav', '') for x in os.walk(data_folder) for y in glob(os.path.join(x[0], '*.wav'))]
+        data_folders = self.config['MAPS_datapaths']
+        self.files = []
+        for data_folder in data_folders:
+            self.files.extend([y.replace('.wav', '') for x in os.walk(data_folder) for y in glob(os.path.join(x[0], '*.wav'))])
         
         
     def audio_get_ground_truth(self,  audio_name: str, S_db: np.ndarray):
@@ -234,16 +252,20 @@ class MAPS_Preprocessor(Data_Preprocessor):
     def audio_get_tempo(self, audio_name: str):
         mid_path = os.path.join(audio_name + ".mid")
         midi_data = mido.MidiFile(mid_path, clip=True)
-        tempo = midi_data.tracks[0][0].tempo # WARNING: Me assume tempo denominator is 4 brrrrrrrrrrr :))
+        tracks = mido.merge_tracks(midi_data.tracks)
+        for msg in tracks:
+            if msg.type == "set_tempo":
+                return msg.tempo
+        return 500000 # set default as 120 bpm if it cannot be read
         
-        return tempo
+
         
 if __name__ == '__main__':
-    path = "config.yaml"
+    path = "/zhome/5d/a/168095/batchelor_amt/rcnn_approach/config.yaml"
     # path = r'C:\University\6th_semester\Bachelor_proj\data_process\config.yaml'
     
     preprocessor = MAPS_Preprocessor(path)
-    preprocessor.save_preprocessed_data()
+    preprocessor.save_preprocessed_data_multiprocess()
 
         
         
