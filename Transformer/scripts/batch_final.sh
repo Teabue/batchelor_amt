@@ -10,7 +10,7 @@
 #BSUB -R "span[hosts=1]"
 
 #BSUB -gpu "num=1:mode=exclusive_process"
-#BSUB -R "select[gpu16gb]"
+#BSUB -R "select[gpu32gb]"
 ### -- specify that we need 4GB of memory per core/slot -- 
 #BSUB -R "rusage[mem=4GB]"
 ### -- specify that we want the job to get killed if it exceeds 5 GB per core/slot -- 
@@ -37,4 +37,4 @@ module load pandas
 module load numpy
 module load yaml-cpp/0.5.3 
 
-python Transformer/master_file.py
+python Transformer/train.py --loss 'cl'

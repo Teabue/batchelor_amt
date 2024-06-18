@@ -2,13 +2,13 @@ import os
 
 # Run BeatTrack model
 model = "BeatTrack"
-for fourier in ['cqt', 'logmel', 'stft']:
+for fourier in ['cqt', 'logmel']:
     
     # # Preprocess
     # command = f'python Transformer/data_preprocessor.py --model {model} --fourier {fourier}'
     # os.system(command)
     
-    for loss in ['ce', 'cl']:
+    for loss in ['ce']:
         
         # Train
         command = f'python Transformer/train.py --loss {loss}'

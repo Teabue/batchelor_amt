@@ -27,7 +27,7 @@ class Transformer(nn.Module):
         tgt_mask = (tgt != 0).unsqueeze(1).unsqueeze(3) # batch_size x 1 x tgt_seq_length x 1
         seq_length = tgt.size(1)
         nopeak_mask = torch.tril(torch.ones(1, seq_length, seq_length), diagonal=0).bool()
-        nopeak_mask[:, 0, 1] = True # SOS can also see the tempo
+        # nopeak_mask[:, 0, 1] = True # SOS can also see the tempo
         tgt_mask = tgt_mask & nopeak_mask.to(self.device)
         return src_mask, tgt_mask
     

@@ -1,7 +1,7 @@
 # ------------------------------- Train configs ------------------------------ #
-num_epochs: 20
-batch_size: 16
-lr: 0.0001
+num_epochs: 30
+batch_size: 4
+lr: 0.00001
 run_save_path: /work3/s214655/FINAL_ABLATION/logmel # This will create a folder with run_1/losses with train_losses and val_losses as well as run_1/models
 run_specific_path: logmel
 run_base_path: '/work3/s214655/FINAL_ABLATION'

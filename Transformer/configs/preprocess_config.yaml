@@ -1,5 +1,5 @@
 # ------------------------------ Miscellaneous ------------------------------ #
-num_workers: 20
+num_workers: 30
 max_sequence_length: 512
 sequence_length: 128
 

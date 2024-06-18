@@ -4,15 +4,15 @@ import os
 import pandas as pd
 import yaml
 
-from test_inference import Inference
-from utils.vocabularies import VocabBeat
+from test_midi_inference import Inference
+from utils.vocabularies import VocabTime
 
 import os
 
-inf_dir = "/work3/s214655/BEAT_INFERENCE"
+inf_dir = "/work3/s214655/TIME_INFERENCE"
 os.makedirs(inf_dir, exist_ok=True)
 
-run_folder_name = "/work3/s214655/FINAL_ABLATION"
+run_folder_name = "/work3/s214655/Time_model"
 
 for fourier_folder in os.listdir(run_folder_name):
     outer_folder = os.path.join(inf_dir, fourier_folder)
@@ -41,8 +41,8 @@ for fourier_folder in os.listdir(run_folder_name):
                     "train": config}
 
         # --------------------------------- Define vocabulary -------------------------------- #
-        vocab = VocabBeat(vocab_configs)
-        vocab.define_vocabulary(pre_configs['max_beats'])
+        vocab = VocabTime(vocab_configs)
+        vocab.define_vocabulary()
 
         # ------------------------------- Choose model ------------------------------- #
         model_path = os.path.join(run_fourier_loss, "models", "model_best.pth")
@@ -65,7 +65,7 @@ for fourier_folder in os.listdir(run_folder_name):
             os.remove(stat_file)
 
         for song in songs:
-            
+
             # Find the path to the audio of the song
             song_wo_ext =  os.path.join(data_dir, song)
             song_path = f"{song_wo_ext}.midi"
@@ -78,18 +78,25 @@ for fourier_folder in os.listdir(run_folder_name):
             
             
             # Get the ground truth score
-            gt = inference.preprocess_ground_truth()
-            
+            gt_score, gt_events = inference.preprocess_ground_truth()
+            print(gt_events)
             # Retrieve initial bpm
-            init_bpm = gt.metronomeMarkBoundaries()[0][-1].getQuarterBPM()
+            init_bpm = None
+            for msg in gt_score.tracks[0]:
+                if msg.type == "set_tempo":
+                    init_bpm = msg.tempo
+                    break
+            
+            if init_bpm is None:
+                raise ValueError(f"No initial bpm found for the song: {song}")
+            
             saved_seq = os.path.exists(os.path.join(output_dir, "seq_predictions", f"{song}.npy"))
             
             # -------------------------------------- Make a prediction score  -------------------------------------------- #
-            pred_score = inference.inference(init_bpm = init_bpm, saved_seq = saved_seq, just_save_seq = False)
-
+            pred_score, pred_events = inference.inference(init_bpm = init_bpm, saved_seq = saved_seq, just_save_seq = False)
+            print(pred_events)
             # ------------------------------- Overlap ground truth with prediction score ------------------------------------ #
-            if pred_score is not None:
-                inference.overlap_gt_and_pred(gt, pred_score)
+            inference.plot_pianoroll(pred_events, gt_events)
 
         # ------------------------------- Compute statistics ------------------------------------ #
         # Load the stat txt file as a dataframe

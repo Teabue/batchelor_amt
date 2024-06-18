@@ -74,7 +74,9 @@ class Song:
     def preprocess_inference_new_song(self, random_slice: bool, spectrogram: np.ndarray | None = None , cur_frame: int = 0, bpm: int = 120, sequence_size: int = 128) -> torch.Tensor:
         
         if random_slice:
-            spectrogram = self.compute_spectrogram()
+            if spectrogram is None:
+                spectrogram = self.compute_spectrogram()
+                
             spectrogram = spectrogram.T
             spectrogram_slices = torch.from_numpy(spectrogram).split(sequence_size, 0)
 

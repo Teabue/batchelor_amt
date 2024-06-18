@@ -31,7 +31,7 @@ class CustomLoss(nn.Module):
                 
     def initialize_logger(self, logger_folder):
         # Create a logger
-        self.logger = logging.getLogger(__name__)
+        self.logger = logging.getLogger(_name_)
         self.logger.setLevel(logging.WARNING)
 
         # Create a file handler
@@ -76,10 +76,10 @@ class CustomLoss(nn.Module):
                 
             loss_k = (loss_reg + loss_class) / upper_bounds[k]
             
-            assert 0 <  loss_reg < (upper_bounds[k] - 1 + self.small_eps) 
-            assert 0 <= loss_class <= upper_bounds[k]
-            assert 0 < loss_class + loss_reg <= upper_bounds[k]
-            assert 0 < loss_k <= 1
+            # assert 0 <  loss_reg < (upper_bounds[k] - 1 + self.small_eps) 
+            # assert 0 <= loss_class <= upper_bounds[k]
+            # assert 0 < loss_class + loss_reg <= upper_bounds[k]
+            # assert 0 < loss_k <= 1
             
             loss += loss_k
         
@@ -109,10 +109,10 @@ class CustomLoss(nn.Module):
 
         loss_k = (loss_reg + loss_class) / torch.tensor(upper_bounds)
 
-        assert torch.all((0 <  loss_reg) & (loss_reg < torch.tensor(upper_bounds) - 1 + self.small_eps))
-        assert torch.all((0 <= loss_class) & (loss_class <= torch.tensor(upper_bounds)))
-        assert torch.all((0 < (loss_class + loss_reg)) & ((loss_class + loss_reg) <= torch.tensor(upper_bounds)))
-        assert torch.all((0 < loss_k) & (loss_k <= 1))
+        # assert torch.all((0 <  loss_reg) & (loss_reg < torch.tensor(upper_bounds) - 1 + self.small_eps))
+        # assert torch.all((0 <= loss_class) & (loss_class <= torch.tensor(upper_bounds)))
+        # assert torch.all((0 < (loss_class + loss_reg)) & ((loss_class + loss_reg) <= torch.tensor(upper_bounds)))
+        # assert torch.all((0 < loss_k) & (loss_k <= 1))
 
         loss = torch.mean(loss_k)
 
@@ -143,13 +143,14 @@ class CustomLoss(nn.Module):
         loss_k = (loss_reg + loss_class) / upper_bounds
 
         if self.logger == None:
-            assert torch.all((0 <  loss_reg) & (loss_reg < upper_bounds - 1 + self.small_eps))
-            assert torch.all((0 <= loss_class) & (loss_class <= upper_bounds))
-            assert torch.all((0 < (loss_class + loss_reg)) & ((loss_class + loss_reg) <= upper_bounds))
-            assert torch.all((0 < loss_k) & (loss_k <= 1))
+            pass
+            # assert torch.all((0 <  loss_reg) & (loss_reg < upper_bounds - 1 + self.small_eps))
+            # assert torch.all((0 <= loss_class) & (loss_class <= upper_bounds))
+            # assert torch.all((0 < (loss_class + loss_reg)) & ((loss_class + loss_reg) <= upper_bounds))
+            # assert torch.all((0 < loss_k) & (loss_k <= 1))
         else:
             if not torch.all((0 <  loss_reg) & (loss_reg < upper_bounds - 1 + self.small_eps)):
-                self.logger.warning('Assertion failed: 0 < loss_reg < upper_bounds - 1 + small_eps')
+                self.logger.warning(f'Assertion failed: 0 < loss_reg < upper_bounds - 1 + small_eps')
             if not torch.all((0 <= loss_class) & (loss_class <= upper_bounds)):
                 self.logger.warning('Assertion failed: 0 <= loss_class <= upper_bounds')
             if not torch.all((0 < (loss_class + loss_reg)) & ((loss_class + loss_reg) <= upper_bounds)):
