@@ -173,7 +173,7 @@ class Inference:
         save_dir = os.path.join(self.output_dir, "piano_roll")
         os.makedirs(save_dir, exist_ok=True)
         plt.tight_layout()
-        plt.savefig(os.path.join(save_dir, self.song_name), bbox_inches='tight')
+        plt.savefig(os.path.join(save_dir, self.song_name), format='png', bbox_inches='tight')
         plt.close()
 
     def test_preprocessing(self, train_val_test: list[str] = ['train', 'val', 'test'], preproc_to_overlap = False) -> None:
