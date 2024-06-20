@@ -92,19 +92,21 @@ class Inference:
             false_negative_rate = false_negative / (true_positive + false_negative)
             false_positive_rate = false_positive / (false_positive + true_negative)
             specificity = true_negative / (false_positive + true_negative)
+            accuracy = (true_positive + true_negative) / (true_positive + true_negative + false_positive + false_negative)
+            f1 = (2 * true_positive) / (2 * true_positive + false_positive + false_negative)
             
-            return iou, sensitivity, false_negative_rate, false_positive_rate, specificity
+            return iou, sensitivity, false_negative_rate, false_positive_rate, specificity, accuracy, f1
 
         # Compute the iou
-        iou, sens, fnr, fpr, spec = inference_stats(elements)
+        iou, sens, fnr, fpr, spec, acc, f1 = inference_stats(elements)
         
         # Append the statistics to a TSR file
         stat_path = os.path.join(self.output_dir, f"statistics")
         with open(f"{stat_path}.txt", "a") as file:
-            file.write(f"{self.song_name}\t{iou:.2f}\t{sens:.2f}\t{fnr:.2f}\t{fpr:.2f}\t{spec:.2f}\n")
+            file.write(f"{self.song_name}\t{iou:.2f}\t{sens:.2f}\t{fnr:.2f}\t{fpr:.2f}\t{spec:.2f}\t{acc:.2f}\t{f1:.2f}\n")
         
         plt.ioff()
-        _, ax = plt.subplots()
+        fig, ax = plt.subplots()
 
         # Find y-axis range as where notes are actually playing
         all_pitches = [p.midi for elem in flat_stream.notesAndRests for p in elem.pitches if isinstance(elem, (note.Note, chord.Chord))]
@@ -143,7 +145,7 @@ class Inference:
             ax.axhline(tick - 0.5, color='grey', linestyle='dotted', linewidth=0.5)
         
         # Combine statistics into one string
-        stats_text = f"IoU: {iou:.2f}\nSensitivity: {sens:.2f}\nFalse Negative Rate: {fnr:.2f}\nFalse Positive Rate: {fpr:.2f}\nSpecificity: {spec:.2f}"
+        stats_text = f"IoU: {iou:.2f}\nSensitivity: {sens:.2f}\nFalse Negative Rate: {fnr:.2f}\nFalse Positive Rate: {fpr:.2f}\nSpecificity: {spec:.2f}\nAccuracy: {acc:.2f}"
 
         # Define properties of the text box
         props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
@@ -171,9 +173,16 @@ class Inference:
 
         # Save the image
         save_dir = os.path.join(self.output_dir, "piano_roll")
+        
         os.makedirs(save_dir, exist_ok=True)
+        fig.set_size_inches(fig.get_figwidth() + 2, fig.get_figheight() * 2)
         plt.tight_layout()
-        plt.savefig(os.path.join(save_dir, self.song_name), format='png', bbox_inches='tight')
+        plt.savefig(f"{os.path.join(save_dir, self.song_name)}.png", format='png', bbox_inches='tight')
+        
+        ax.set_xlim(0, 32)
+        plt.savefig(f"{os.path.join(save_dir, f'{self.song_name}_zoomed')}.png", format='png', bbox_inches='tight')
+        
+        
         plt.close()
 
     def test_preprocessing(self, train_val_test: list[str] = ['train', 'val', 'test'], preproc_to_overlap = False) -> None:
@@ -698,10 +707,15 @@ class Inference:
         
         if output_dir is not None:
             print("We can show the score and write it to a file")
-            score.write('musicxml', fp=f'{output_dir}.xml')
+            
+            try:
+                score.write('musicxml', fp=f'{output_dir}.xml')
 
-            # Adjust the voice numbers (MuseScore does not allow 0-numbered voices)
-            self._adjust_voice_numbers(f'{output_dir}.xml')
+                # Adjust the voice numbers (MuseScore does not allow 0-numbered voices)
+                self._adjust_voice_numbers(f'{output_dir}.xml')
+            except:
+                print(f"Something wrong with {self.song_name}")
+                return
         
         return score
 
@@ -710,11 +724,11 @@ class Inference:
         if new_song:
             # Find the path to the gt file
             song_wo_ext = os.path.join(os.path.dirname(self.audio_dir), self.song_name)
-            avail_paths = np.array([os.path.exists(f"{song_wo_ext}.{ext}") for ext in self.pre_config['audio_file_extension']])
+            avail_paths = np.array([os.path.exists(f"{song_wo_ext}{ext}") for ext in self.pre_config['audio_file_extensions']])
             if not np.any(avail_paths):
                 raise FileNotFoundError(f"{self.song_name} could not be found")
-            avail_ext = np.asarray(self.pre_config['audio_file_extension'])[avail_paths][0]
-            song_path = f"{song_wo_ext}.{avail_ext}"
+            avail_ext = np.asarray(self.pre_config['audio_file_extensions'])[avail_paths][0]
+            song_path = f"{song_wo_ext}{avail_ext}"
             
             # Load the ground truth xml
             if dataset == 'musescore':
@@ -1213,7 +1227,7 @@ if __name__ == '__main__':
     with open("Transformer/configs/preprocess_config.yaml", 'r') as f:
         pre_configs = yaml.safe_load(f)
     
-    with open("Transformer/configs/train_config.yaml", 'r') as f:
+    with open("/work3/s214655/FINAL_ABLATION/cqt/ce/train_config.yaml", 'r') as f:
         config = yaml.safe_load(f)
         
     # This is scuffed, but ignore it lolz
@@ -1229,29 +1243,29 @@ if __name__ == '__main__':
     vocab.define_vocabulary(pre_configs['max_beats'])
     
     # ------------------------------- Choose model ------------------------------- #
-    model_name = '29-05-24_musescore.pth' 
+    model_path = '/work3/s214655/FINAL_ABLATION/cqt/ce/models/model_best.pth' 
     
     # ----------------------------- Choose song ----------------------------- #
-    new_song_name = "Giornos_Theme"
+    new_song_name = "Fallen_Down"
     
     # ----------------------------- Choose the type of inference ----------------------------- #
-    new_song = False
+    new_song = True
     preprocess = False
-    overlap = True
+    overlap = False
     preproc_to_overlap = False
-    midi = True
+    midi = False
     
     # --------------------------------- Collect directories -------------------------------- #
-    output_dir = "inference_songs"
+    output_dir = "INFERENCE_NEW_SONG"
     data_dir= configs['preprocess']['output_dir'] if preprocess else None
-    audio_dirs = np.asarray(configs['preprocess']['data_dirs'])
-    
-    all_paths = [[os.path.exists(os.path.join(aud_path, f"{new_song_name}.{ext}")) for ext in pre_configs['audio_file_extension']] for aud_path in audio_dirs]
+    audio_dirs = np.asarray([""])
+
+    all_paths = [[os.path.exists(os.path.join(aud_path, f"{new_song_name}{ext}")) for ext in pre_configs['audio_file_extensions']] for aud_path in audio_dirs]
     avail_paths = np.any(all_paths, axis = 1)
     if not np.any(avail_paths):
         raise FileNotFoundError(f"{new_song_name} could not be found")
-    avail_ext = np.asarray(pre_configs['audio_file_extension'])[np.any(all_paths, axis = 0)][0]
-    song_path = os.path.join(audio_dirs[avail_paths][0], f"{new_song_name}.{avail_ext}")
+    avail_ext = np.asarray(pre_configs['audio_file_extensions'])[np.any(all_paths, axis = 0)][0]
+    song_path = os.path.join(audio_dirs[avail_paths][0], f"{new_song_name}{avail_ext}")
     
     dirs = {"out": output_dir,
             "data": data_dir,
@@ -1259,11 +1273,11 @@ if __name__ == '__main__':
     
     # ----------------------------- Instantiate inference object ----------------------------- #
     inference = Inference(vocab=vocab, configs = configs, dirs = dirs, 
-                          song_name = new_song_name, model_name = model_name)
+                          song_name = new_song_name, model_path = model_path)
     
     if new_song:
         print(f"Performing inference on a new song: {new_song_name}")
-        init_bpm = 128
+        init_bpm = 120
         saved_seq = os.path.exists(os.path.join(dirs['out'], "seq_predictions", f"{new_song_name}.npy"))
         score = inference.inference(init_bpm = init_bpm, saved_seq = saved_seq, just_save_seq = False)
         

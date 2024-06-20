@@ -61,10 +61,16 @@ songs = pd.unique(df['song_name'])
 
 # Delete statistics file if it exists
 stat_file = os.path.join(dirs['out'], f"statistics.txt")
-if os.path.exists(stat_file):
-    os.remove(stat_file)
+# if os.path.exists(stat_file):
+#     os.remove(stat_file)
 
-for song in songs:
+for idx, song in enumerate(songs):
+    if idx >= 50:
+        break
+    
+    if os.path.exists(os.path.join(inf_dir, fourier_folder, loss_folder, 'overlap')) and f"{song}.xml" in os.listdir(os.path.join(inf_dir, fourier_folder, loss_folder, 'overlap')):
+        print(f"{song} already done!")
+        continue
     
     # Find the path to the audio of the song
     song_wo_ext =  os.path.join(data_dir, song)
@@ -93,7 +99,7 @@ for song in songs:
 
 # ------------------------------- Compute statistics ------------------------------------ #
 # Load the stat txt file as a dataframe
-stats = ["iou", "sens", "fnr", "fpr", "spec"]
+stats = ["iou", "sens", "fnr", "fpr", "spec", "acc", "f1"]
 df_stat = pd.read_csv(stat_file, delimiter='\t', names = stats, index_col = 0)
 
 # Calculate confidence interval
